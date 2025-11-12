@@ -308,35 +308,14 @@ func (at *AutoTrader) autoSyncBalanceIfNeeded() {
 	}
 
 	// ✅ 提取总资产（total equity = 钱包余额 + 未实现盈亏）
-	// 使用总资产而不是可用余额，避免持仓时误判余额变化
-	var actualBalance float64
-	totalWalletBalance := 0.0
-	totalUnrealizedProfit := 0.0
-
-	if wallet, ok := balanceInfo["totalWalletBalance"].(float64); ok {
-		totalWalletBalance = wallet
+	// 使用统一的工具函数解析余额信息
+	totalEquity, success := ParseTotalEquity(balanceInfo, fmt.Sprintf("[%s]", at.name))
+	if !success {
+		log.Printf("❌ [%s] 无法提取余额信息，跳过本次同步", at.name)
+		at.lastBalanceSyncTime = time.Now()
+		return
 	}
-	if unrealized, ok := balanceInfo["totalUnrealizedProfit"].(float64); ok {
-		totalUnrealizedProfit = unrealized
-	}
-
-	totalEquity := totalWalletBalance + totalUnrealizedProfit
-	if totalEquity > 0 {
-		actualBalance = totalEquity
-	} else {
-		// Fallback: 尝试其他字段
-		if availableBalance, ok := balanceInfo["availableBalance"].(float64); ok && availableBalance > 0 {
-			actualBalance = availableBalance
-			log.Printf("⚠️ [%s] 无法提取 totalEquity，使用 availableBalance: %.2f", at.name, actualBalance)
-		} else if balance, ok := balanceInfo["balance"].(float64); ok && balance > 0 {
-			actualBalance = balance
-			log.Printf("⚠️ [%s] 无法提取 totalEquity，使用 balance: %.2f", at.name, actualBalance)
-		} else {
-			log.Printf("⚠️ [%s] 无法提取任何余额字段", at.name)
-			at.lastBalanceSyncTime = time.Now()
-			return
-		}
-	}
+	actualBalance := totalEquity
 
 	oldBalance := at.initialBalance
 
@@ -368,8 +347,8 @@ func (at *AutoTrader) autoSyncBalanceIfNeeded() {
 
 	// 变化超过5%才更新
 	if math.Abs(changePercent) > 5.0 {
-		log.Printf("🔔 [%s] 检测到余额大幅变化: %.2f → %.2f USDT (%.2f%%) [钱包: %.2f + 未实现: %.2f]",
-			at.name, oldBalance, actualBalance, changePercent, totalWalletBalance, totalUnrealizedProfit)
+		log.Printf("🔔 [%s] 检测到余额大幅变化: %.2f → %.2f USDT (%.2f%%)",
+			at.name, oldBalance, actualBalance, changePercent)
 
 		// 更新内存中的 initialBalance
 		at.initialBalance = actualBalance
