@@ -956,9 +956,18 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 style={{ color: '#848E9C' }}
               >
                 <Brain className="w-10 h-10 md:w-12 md:h-12 mx-auto mb-2 opacity-50" />
-                <div className="text-xs md:text-sm">
+                <div className="text-xs md:text-sm mb-3">
                   {t('noModelsConfigured', language)}
                 </div>
+                <button
+                  onClick={handleAddModel}
+                  className="px-4 py-2 rounded text-sm font-medium transition-colors"
+                  style={{ backgroundColor: '#F0B90B', color: '#000' }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FCD535'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#F0B90B'}
+                >
+                  {t('configureAIModels', language)}
+                </button>
               </div>
             )}
           </div>
@@ -1023,9 +1032,18 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 style={{ color: '#848E9C' }}
               >
                 <Landmark className="w-10 h-10 md:w-12 md:h-12 mx-auto mb-2 opacity-50" />
-                <div className="text-xs md:text-sm">
+                <div className="text-xs md:text-sm mb-3">
                   {t('noExchangesConfigured', language)}
                 </div>
+                <button
+                  onClick={handleAddExchange}
+                  className="px-4 py-2 rounded text-sm font-medium transition-colors"
+                  style={{ backgroundColor: '#F0B90B', color: '#000' }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FCD535'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#F0B90B'}
+                >
+                  {t('configureExchanges', language)}
+                </button>
               </div>
             )}
           </div>
@@ -1222,71 +1240,43 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             {/* Step-by-Step Guide */}
             <div className="space-y-4">
               {/* Step 1: AI Model */}
-              <div className="rounded-lg p-4 md:p-6" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
-                <div className="flex items-start gap-3 md:gap-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-base md:text-lg font-bold"
+              <div className="rounded-lg p-3 md:p-4" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-sm md:text-base font-bold"
                        style={{ backgroundColor: configuredModels.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
                     {configuredModels.length > 0 ? '✓' : '1'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base md:text-lg font-semibold mb-2" style={{ color: '#EAECEF' }}>
+                    <h3 className="text-sm md:text-base font-semibold" style={{ color: '#EAECEF' }}>
                       {t('quickStartStep1Title', language)}
                     </h3>
-                    {configuredModels.length > 0 ? (
-                      <p className="text-sm md:text-base mb-2" style={{ color: '#0ECB81' }}>
-                        {t('step1Completed', language)}: {configuredModels.map(m => getModelDisplayName(m.id)).join(', ')}
-                      </p>
-                    ) : (
-                      <>
-                        <p className="text-xs md:text-sm mb-3" style={{ color: '#848E9C' }}>
-                          {t('step1Description', language)}
-                        </p>
-                        <button
-                          onClick={() => navigate('/settings')}
-                          className="px-4 py-2 rounded text-sm md:text-base font-medium transition-colors"
-                          style={{ backgroundColor: '#F0B90B', color: '#000' }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FCD535'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#F0B90B'}
-                        >
-                          {t('goToSettings', language)}
-                        </button>
-                      </>
-                    )}
+                    <p className="text-xs md:text-sm" style={{ color: configuredModels.length > 0 ? '#0ECB81' : '#848E9C' }}>
+                      {configuredModels.length > 0
+                        ? `${t('step1Completed', language)}: ${configuredModels.map(m => getModelDisplayName(m.id)).join(', ')}`
+                        : t('notConfigured', language)
+                      }
+                    </p>
                   </div>
                 </div>
               </div>
 
               {/* Step 2: Exchange */}
-              <div className="rounded-lg p-4 md:p-6" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
-                <div className="flex items-start gap-3 md:gap-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-base md:text-lg font-bold"
+              <div className="rounded-lg p-3 md:p-4" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-sm md:text-base font-bold"
                        style={{ backgroundColor: configuredExchanges.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
                     {configuredExchanges.length > 0 ? '✓' : '2'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base md:text-lg font-semibold mb-2" style={{ color: '#EAECEF' }}>
+                    <h3 className="text-sm md:text-base font-semibold" style={{ color: '#EAECEF' }}>
                       {t('quickStartStep2Title', language)}
                     </h3>
-                    {configuredExchanges.length > 0 ? (
-                      <p className="text-sm md:text-base mb-2" style={{ color: '#0ECB81' }}>
-                        {t('step2Completed', language)}: {configuredExchanges.map(e => e.name).join(', ')}
-                      </p>
-                    ) : (
-                      <>
-                        <p className="text-xs md:text-sm mb-3" style={{ color: '#848E9C' }}>
-                          {t('step2Description', language)}
-                        </p>
-                        <button
-                          onClick={() => navigate('/settings')}
-                          className="px-4 py-2 rounded text-sm md:text-base font-medium transition-colors"
-                          style={{ backgroundColor: '#F0B90B', color: '#000' }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#FCD535'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#F0B90B'}
-                        >
-                          {t('goToSettings', language)}
-                        </button>
-                      </>
-                    )}
+                    <p className="text-xs md:text-sm" style={{ color: configuredExchanges.length > 0 ? '#0ECB81' : '#848E9C' }}>
+                      {configuredExchanges.length > 0
+                        ? `${t('step2Completed', language)}: ${configuredExchanges.map(e => e.name).join(', ')}`
+                        : t('notConfigured', language)
+                      }
+                    </p>
                   </div>
                 </div>
               </div>
