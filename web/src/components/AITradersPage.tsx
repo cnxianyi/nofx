@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useSWR from 'swr'
 import { api } from '../lib/api'
+import { cacheManager } from '../lib/cache'
 import type {
   TraderInfo,
   CreateTraderRequest,
@@ -270,7 +271,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         error: '创建失败',
       })
       setShowCreateModal(false)
-      mutateTraders()
+      cacheManager.onTraderCreated()
     } catch (error) {
       console.error('Failed to create trader:', error)
       toast.error(t('createTraderFailed', language))
@@ -322,14 +323,15 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         use_oi_top: data.use_oi_top,
       }
 
-      await toast.promise(api.updateTrader(editingTrader.trader_id, request), {
+      const traderId = editingTrader.trader_id
+      await toast.promise(api.updateTrader(traderId, request), {
         loading: '正在保存…',
         success: '保存成功',
         error: '保存失败',
       })
       setShowEditModal(false)
       setEditingTrader(null)
-      mutateTraders()
+      cacheManager.onTraderUpdated(traderId)
     } catch (error) {
       console.error('Failed to update trader:', error)
       toast.error(t('updateTraderFailed', language))
@@ -348,7 +350,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         success: '删除成功',
         error: '删除失败',
       })
-      mutateTraders()
+      cacheManager.onTraderDeleted(traderId)
     } catch (error) {
       console.error('Failed to delete trader:', error)
       toast.error(t('deleteTraderFailed', language))
