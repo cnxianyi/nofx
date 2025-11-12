@@ -1,16 +1,16 @@
 import { describe, it, expect } from 'vitest'
 
 /**
- * PR #669 測試: 防止 null token 導致未授權的 API 調用
+ * PR #669 Test: Prevent unauthorized API calls with null token
  *
- * 問題：當用戶未登入時（user/token 為 null），SWR 仍然會使用空 key 發起 API 請求
- * 修復：在 SWR key 中添加 `user && token` 檢查，當未登入時返回 null，阻止 API 調用
+ * Issue: When user is not logged in (user/token is null), SWR still makes API requests with empty key
+ * Fix: Add `user && token` check in SWR key, return null when not logged in to prevent API calls
  */
 
 describe('API Guard Logic (PR #669)', () => {
   /**
-   * 測試 SWR key 生成邏輯
-   * 核心修復：key 必須包含 user && token 檢查
+   * Test SWR key generation logic
+   * Core fix: key must include user && token check
    */
   describe('SWR key generation', () => {
     it('should return null when user is null', () => {
@@ -348,11 +348,11 @@ describe('API Guard Logic (PR #669)', () => {
     })
 
     it('should simulate SWR behavior with null key', () => {
-      // SWR 不會在 key 為 null 時發起請求
+      // SWR does not make requests when key is null
       const key = null
       const fetcher = (k: string) => `API response for ${k}`
 
-      // 模擬 SWR 行為：key 為 null 時不調用 fetcher
+      // Simulate SWR behavior: do not call fetcher when key is null
       const data = key ? fetcher(key) : undefined
 
       expect(data).toBeUndefined()

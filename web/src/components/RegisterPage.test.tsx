@@ -8,12 +8,12 @@ import { describe, it, expect } from 'vitest'
  * 2. 自定义的 isStrongPassword 函数
  * 这导致校验规则可能不一致
  *
- * 修复：移除重复的 isStrongPassword 函数,统一使用 PasswordChecklist 的校验结果
+ * Fix: Remove duplicate isStrongPassword function, use unified PasswordChecklist validation result
  *
- * 本测试专注于验证密码校验逻辑的一致性,确保:
- * 1. 移除了重复的 isStrongPassword 函数
- * 2. 使用统一的 PasswordChecklist 校验
- * 3. 特殊字符规则在正常显示和错误提示中保持一致
+ * This test focuses on verifying password validation logic consistency, ensuring:
+ * 1. Removed duplicate isStrongPassword function
+ * 2. Use unified PasswordChecklist validation
+ * 3. Special character rules are consistent in normal display and error messages
  */
 
 describe('RegisterPage - Password Validation Consistency (Logic Tests)', () => {
@@ -194,8 +194,8 @@ describe('RegisterPage - Password Validation Consistency (Logic Tests)', () => {
 
   /**
    * 测试特殊字符一致性
-   * 确保在 RegisterPage 的正常显示(第 229-251 行)和错误提示(第 300-323 行)中
-   * 使用相同的特殊字符正则 /[@#$%!&*?]/
+   * Ensure using the same special character regex /[@#$%!&*?]/ in RegisterPage's
+   * normal display (lines 229-251) and error messages (lines 300-323)
    */
   describe('special character consistency', () => {
     it('should use consistent special character regex across all validations', () => {
@@ -312,7 +312,7 @@ describe('RegisterPage - Password Validation Consistency (Logic Tests)', () => {
 
   /**
    * 测试重构后的一致性
-   * 确保移除 isStrongPassword 函数后,所有校验都通过 PasswordChecklist
+   * Ensure all validations go through PasswordChecklist after removing isStrongPassword function
    */
   describe('refactoring consistency verification', () => {
     it('should have removed duplicate isStrongPassword function', () => {

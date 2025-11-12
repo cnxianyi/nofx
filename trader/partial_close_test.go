@@ -114,14 +114,14 @@ func TestPartialCloseMinPositionCheck(t *testing.T) {
 			remainingQuantity := tt.totalQuantity - closeQuantity
 			remainingValue := remainingQuantity * tt.markPrice
 
-			// 驗證計算（使用浮點數比較允許微小誤差）
+			// Verify calculation (allow small floating point errors)
 			const epsilon = 0.001
 			if remainingValue-tt.expectRemainValue > epsilon || tt.expectRemainValue-remainingValue > epsilon {
 				t.Errorf("計算錯誤: 剩餘價值 = %.2f, 期望 = %.2f",
 					remainingValue, tt.expectRemainValue)
 			}
 
-			// 驗證最小倉位檢查邏輯
+			// Verify minimum position check logic
 			const MIN_POSITION_VALUE = 10.0
 			shouldFullClose := remainingValue > 0 && remainingValue <= MIN_POSITION_VALUE
 
@@ -174,7 +174,7 @@ func TestPartialCloseWithStopLossTakeProfitRecovery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 模擬止盈止損恢復邏輯
+			// Simulate TP/SL restoration logic
 			stopLossRecovered := tt.newStopLoss > 0
 			takeProfitRecovered := tt.newTakeProfit > 0
 
@@ -236,7 +236,7 @@ func TestPartialCloseEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 模擬百分比驗證邏輯
+			// Simulate percentage verification logic
 			var err error
 			if tt.closePercentage <= 0 || tt.closePercentage > 100 {
 				err = fmt.Errorf("平仓百分比必须在 0-100 之间，当前: %.1f", tt.closePercentage)
@@ -329,7 +329,7 @@ func TestPartialCloseIntegration(t *testing.T) {
 			remainingQuantity := tt.totalQuantity - closeQuantity
 			remainingValue := remainingQuantity * tt.markPrice
 
-			// 驗證最小倉位檢查
+			// Verify minimum position check
 			const MIN_POSITION_VALUE = 10.0
 			shouldFullClose := remainingValue > 0 && remainingValue <= MIN_POSITION_VALUE
 
@@ -338,7 +338,7 @@ func TestPartialCloseIntegration(t *testing.T) {
 					shouldFullClose, tt.expectFullClose, remainingValue)
 			}
 
-			// 模擬執行邏輯
+			// Simulate execution logic
 			if shouldFullClose {
 				// 應該轉為全平
 				if tt.side == "LONG" {
@@ -363,7 +363,7 @@ func TestPartialCloseIntegration(t *testing.T) {
 				}
 			}
 
-			// 驗證調用
+			// Verify invocation
 			if tt.expectFullClose {
 				if !mockTrader.closeLongCalled && !mockTrader.closeShortCalled {
 					t.Error("期望調用全平但沒有調用")

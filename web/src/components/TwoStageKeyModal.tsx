@@ -105,14 +105,14 @@ export function TwoStageKeyModal({
             ...obfuscationLog,
             `Stage 1: ${new Date().toISOString()} - Auto copied obfuscation`,
           ])
-          toast.success('已复制混淆字符串到剪贴板')
+          toast.success('Obfuscation string copied to clipboard')
         } catch {
           setClipboardStatus('failed')
           setObfuscationLog([
             ...obfuscationLog,
             `Stage 1: ${new Date().toISOString()} - Auto copy failed, manual required`,
           ])
-          toast.error('复制失败，请手动复制混淆字符串')
+          toast.error('Copy failed, please copy the obfuscation string manually')
         }
       } else {
         setClipboardStatus('failed')
@@ -120,7 +120,7 @@ export function TwoStageKeyModal({
           ...obfuscationLog,
           `Stage 1: ${new Date().toISOString()} - Clipboard API not available`,
         ])
-        toast('当前浏览器不支持自动复制，请手动复制')
+        toast('Browser does not support auto-copy, please copy manually')
       }
 
       setTimeout(() => {
@@ -145,7 +145,7 @@ export function TwoStageKeyModal({
       return
     }
 
-    // ✅ 拼接時移除可能的 0x 前綴
+    // ✅ Remove possible 0x prefix when concatenating
     const normalized1 = part1.startsWith('0x') ? part1.slice(2) : part1
     const fullKey = normalized1 + normalized2
     if (!validatePrivateKeyFormat(fullKey, expectedLength)) {

@@ -63,11 +63,11 @@ export const cacheManager = {
    */
   onTraderDeleted: (traderId: string) => {
     console.log(`[Cache] Invalidating after trader deleted: ${traderId}`)
-    // 更新列表（移除已刪除的交易員）
+    // Update list (remove deleted trader)
     CacheDependencies.TRADER_LIFECYCLE.forEach(key => mutate(key))
-    // 清除該交易員的所有緩存
+    // Clear all caches for this trader
     CacheDependencies.TRADER_STATE(traderId).forEach(key => mutate(key))
-    // 清除包含該交易員的對比圖表緩存
+    // Clear comparison chart caches containing this trader
     mutate((key: any) =>
       typeof key === 'string' &&
       key.startsWith('all-equity-histories-') &&
