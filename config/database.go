@@ -45,6 +45,7 @@ type DatabaseInterface interface {
 	GetUserSignalSource(userID string) (*UserSignalSource, error)
 	UpdateUserSignalSource(userID, coinPoolURL, oiTopURL string) error
 	GetCustomCoins() []string
+	GetAllTimeframes() []string
 	LoadBetaCodesFromFile(filePath string) error
 	ValidateBetaCode(code string) (bool, error)
 	UseBetaCode(code, userEmail string) error
@@ -490,6 +491,9 @@ type TraderRecord struct {
 	IsCrossMargin        bool      `json:"is_cross_margin"`        // 是否为全仓模式（true=全仓，false=逐仓）
 	TakerFeeRate         float64   `json:"taker_fee_rate"`         // Taker fee rate, default 0.0004
 	MakerFeeRate         float64   `json:"maker_fee_rate"`         // Maker fee rate, default 0.0002
+	OrderStrategy        string    `json:"order_strategy"`         // Order strategy: "market_only", "conservative_hybrid", "limit_only"
+	LimitPriceOffset     float64   `json:"limit_price_offset"`     // Limit order price offset percentage (e.g., -0.03 for -0.03%)
+	LimitTimeoutSeconds  int       `json:"limit_timeout_seconds"`  // Timeout in seconds before converting to market order (default: 60)
 	Timeframes           string    `json:"timeframes"`             // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
@@ -1136,6 +1140,49 @@ func (d *Database) GetCustomCoins() []string {
 		}
 	}
 	return symbols
+}
+
+// GetAllTimeframes 获取所有交易员配置的时间线并集 / Get union of all trader timeframes
+func (d *Database) GetAllTimeframes() []string {
+	rows, err := d.db.Query(`
+		SELECT DISTINCT timeframes
+		FROM traders
+		WHERE timeframes != '' AND is_running = 1
+	`)
+	if err != nil {
+		log.Printf("查询 trader timeframes 失败: %v", err)
+		return []string{"4h"} // 默认返回 4h
+	}
+	defer rows.Close()
+
+	timeframeSet := make(map[string]bool)
+	for rows.Next() {
+		var timeframes string
+		if err := rows.Scan(&timeframes); err != nil {
+			continue
+		}
+		// 解析逗号分隔的时间线
+		for _, tf := range strings.Split(timeframes, ",") {
+			tf = strings.TrimSpace(tf)
+			if tf != "" {
+				timeframeSet[tf] = true
+			}
+		}
+	}
+
+	// 转换为切片
+	result := make([]string, 0, len(timeframeSet))
+	for tf := range timeframeSet {
+		result = append(result, tf)
+	}
+
+	// 如果没有配置，返回默认值
+	if len(result) == 0 {
+		return []string{"15m", "1h", "4h"}
+	}
+
+	log.Printf("📊 从数据库加载所有活跃 trader 的时间线: %v", result)
+	return result
 }
 
 // Close 关闭数据库连接
