@@ -258,7 +258,7 @@ func (d *Database) createTables() error {
 		`ALTER TABLE traders ADD COLUMN system_prompt_template TEXT DEFAULT 'default'`, // 系统提示词模板名称
 		`ALTER TABLE traders ADD COLUMN taker_fee_rate REAL DEFAULT 0.0004`,            // Taker fee rate, default 0.0004
 		`ALTER TABLE traders ADD COLUMN maker_fee_rate REAL DEFAULT 0.0002`,            // Maker fee rate, default 0.0002
-		`ALTER TABLE traders ADD COLUMN order_strategy TEXT DEFAULT 'market_only'`,     // Order strategy: market_only, conservative_hybrid, limit_only
+		`ALTER TABLE traders ADD COLUMN order_strategy TEXT DEFAULT 'conservative_hybrid'`,  // Order strategy: market_only, conservative_hybrid, limit_only
 		`ALTER TABLE traders ADD COLUMN limit_price_offset REAL DEFAULT -0.03`,         // Limit order price offset percentage (e.g., -0.03 for -0.03%)
 		`ALTER TABLE traders ADD COLUMN limit_timeout_seconds INTEGER DEFAULT 60`,      // Timeout in seconds before converting to market order
 		`ALTER TABLE ai_models ADD COLUMN custom_api_url TEXT DEFAULT ''`,              // 自定义API地址
@@ -288,26 +288,41 @@ func (d *Database) createTables() error {
 // initDefaultData 初始化默认数据
 func (d *Database) initDefaultData() error {
 	// 初始化AI模型（使用default用户）
+	// 注意：遷移到自增 ID 後，需要使用 model_id 而不是 id
 	aiModels := []struct {
-		id, name, provider string
+		modelID, name, provider string
 	}{
 		{"deepseek", "DeepSeek", "deepseek"},
 		{"qwen", "Qwen", "qwen"},
 	}
 
 	for _, model := range aiModels {
-		_, err := d.db.Exec(`
-			INSERT OR IGNORE INTO ai_models (id, user_id, name, provider, enabled) 
-			VALUES (?, 'default', ?, ?, 0)
-		`, model.id, model.name, model.provider)
+		// 檢查是否已存在（使用 model_id 和 user_id 組合）
+		var count int
+		err := d.db.QueryRow(`
+			SELECT COUNT(*) FROM ai_models
+			WHERE model_id = ? AND user_id = 'default'
+		`, model.modelID).Scan(&count)
 		if err != nil {
-			return fmt.Errorf("初始化AI模型失败: %w", err)
+			return fmt.Errorf("检查AI模型失败: %w", err)
+		}
+
+		if count == 0 {
+			// 不存在則插入，讓 id 自動遞增
+			_, err = d.db.Exec(`
+				INSERT INTO ai_models (user_id, model_id, name, provider, enabled)
+				VALUES ('default', ?, ?, ?, 0)
+			`, model.modelID, model.name, model.provider)
+			if err != nil {
+				return fmt.Errorf("初始化AI模型失败: %w", err)
+			}
 		}
 	}
 
 	// 初始化交易所（使用default用户）
+	// 注意：遷移到自增 ID 後，需要使用 exchange_id 而不是 id
 	exchanges := []struct {
-		id, name, typ string
+		exchangeID, name, typ string
 	}{
 		{"binance", "Binance Futures", "binance"},
 		{"hyperliquid", "Hyperliquid", "hyperliquid"},
@@ -315,12 +330,25 @@ func (d *Database) initDefaultData() error {
 	}
 
 	for _, exchange := range exchanges {
-		_, err := d.db.Exec(`
-			INSERT OR IGNORE INTO exchanges (id, user_id, name, type, enabled) 
-			VALUES (?, 'default', ?, ?, 0)
-		`, exchange.id, exchange.name, exchange.typ)
+		// 檢查是否已存在（使用 exchange_id 和 user_id 組合）
+		var count int
+		err := d.db.QueryRow(`
+			SELECT COUNT(*) FROM exchanges
+			WHERE exchange_id = ? AND user_id = 'default'
+		`, exchange.exchangeID).Scan(&count)
 		if err != nil {
-			return fmt.Errorf("初始化交易所失败: %w", err)
+			return fmt.Errorf("检查交易所失败: %w", err)
+		}
+
+		if count == 0 {
+			// 不存在則插入，讓 id 自動遞增
+			_, err = d.db.Exec(`
+				INSERT INTO exchanges (user_id, exchange_id, name, type, enabled)
+				VALUES ('default', ?, ?, ?, 0)
+			`, exchange.exchangeID, exchange.name, exchange.typ)
+			if err != nil {
+				return fmt.Errorf("初始化交易所失败: %w", err)
+			}
 		}
 	}
 
@@ -940,36 +968,36 @@ func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
 
 // UpdateAIModel 更新AI模型配置，如果不存在则创建用户特定配置
 func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customModelName string) error {
-	// 先尝试精确匹配 ID（新版逻辑，支持多个相同 provider 的模型）
-	var existingID string
+	// 先尝试精确匹配 model_id（新版逻辑，支持多个相同 provider 的模型）
+	var existingModelID string
 	err := d.db.QueryRow(`
-		SELECT id FROM ai_models WHERE user_id = ? AND id = ? LIMIT 1
-	`, userID, id).Scan(&existingID)
+		SELECT model_id FROM ai_models WHERE user_id = ? AND model_id = ? LIMIT 1
+	`, userID, id).Scan(&existingModelID)
 
 	if err == nil {
-		// 找到了现有配置（精确匹配 ID），更新它
+		// 找到了现有配置（精确匹配 model_id），更新它
 		encryptedAPIKey := d.encryptSensitiveData(apiKey)
 		_, err = d.db.Exec(`
 			UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
-			WHERE id = ? AND user_id = ?
-		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingID, userID)
+			WHERE model_id = ? AND user_id = ?
+		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
 		return err
 	}
 
-	// ID 不存在，尝试兼容旧逻辑：将 id 作为 provider 查找
+	// model_id 不存在，尝试兼容旧逻辑：将 id 作为 provider 查找
 	provider := id
 	err = d.db.QueryRow(`
-		SELECT id FROM ai_models WHERE user_id = ? AND provider = ? LIMIT 1
-	`, userID, provider).Scan(&existingID)
+		SELECT model_id FROM ai_models WHERE user_id = ? AND provider = ? LIMIT 1
+	`, userID, provider).Scan(&existingModelID)
 
 	if err == nil {
 		// 找到了现有配置（通过 provider 匹配，兼容旧版），更新它
-		log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, existingID)
+		log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, existingModelID)
 		encryptedAPIKey := d.encryptSensitiveData(apiKey)
 		_, err = d.db.Exec(`
 			UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
-			WHERE id = ? AND user_id = ?
-		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingID, userID)
+			WHERE model_id = ? AND user_id = ?
+		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
 		return err
 	}
 
@@ -1106,7 +1134,7 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 	// 构建完整的 UPDATE 语句
 	query := fmt.Sprintf(`
 		UPDATE exchanges SET %s
-		WHERE id = ? AND user_id = ?
+		WHERE exchange_id = ? AND user_id = ?
 	`, strings.Join(setClauses, ", "))
 
 	// 执行更新
@@ -1148,11 +1176,16 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 		log.Printf("🆕 UpdateExchange: 创建新记录 ID=%s, name=%s, type=%s", id, name, typ)
 
 		// 创建用户特定的配置，使用原始的交易所ID
+		// 加密敏感字段
+		encryptedAPIKey := d.encryptSensitiveData(apiKey)
+		encryptedSecretKey := d.encryptSensitiveData(secretKey)
+		encryptedAsterPrivateKey := d.encryptSensitiveData(asterPrivateKey)
+
 		_, err = d.db.Exec(`
-			INSERT INTO exchanges (id, user_id, name, type, enabled, api_key, secret_key, testnet,
+			INSERT INTO exchanges (exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet,
 			                       hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		`, id, userID, name, typ, enabled, apiKey, secretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey)
+		`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey)
 
 		if err != nil {
 			log.Printf("❌ UpdateExchange: 创建记录失败: %v", err)
@@ -1169,7 +1202,7 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 // CreateAIModel 创建AI模型配置
 func (d *Database) CreateAIModel(userID, id, name, provider string, enabled bool, apiKey, customAPIURL string) error {
 	_, err := d.db.Exec(`
-		INSERT OR IGNORE INTO ai_models (id, user_id, name, provider, enabled, api_key, custom_api_url) 
+		INSERT OR IGNORE INTO ai_models (model_id, user_id, name, provider, enabled, api_key, custom_api_url)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, id, userID, name, provider, enabled, apiKey, customAPIURL)
 	return err
@@ -1183,7 +1216,7 @@ func (d *Database) CreateExchange(userID, id, name, typ string, enabled bool, ap
 	encryptedAsterPrivateKey := d.encryptSensitiveData(asterPrivateKey)
 
 	_, err := d.db.Exec(`
-		INSERT OR IGNORE INTO exchanges (id, user_id, name, type, enabled, api_key, secret_key, testnet, hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key) 
+		INSERT OR IGNORE INTO exchanges (exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet, hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey)
 	return err
@@ -1209,6 +1242,9 @@ func (d *Database) GetTraders(userID string) ([]*TraderRecord, error) {
 		       COALESCE(system_prompt_template, 'default') as system_prompt_template,
 		       COALESCE(is_cross_margin, 1) as is_cross_margin,
 		       COALESCE(taker_fee_rate, 0.0004) as taker_fee_rate, COALESCE(maker_fee_rate, 0.0002) as maker_fee_rate,
+		       COALESCE(order_strategy, 'conservative_hybrid') as order_strategy,
+		       COALESCE(limit_price_offset, -0.03) as limit_price_offset,
+		       COALESCE(limit_timeout_seconds, 60) as limit_timeout_seconds,
 		       created_at, updated_at
 		FROM traders WHERE user_id = ? ORDER BY created_at DESC
 	`, userID)
@@ -1228,6 +1264,7 @@ func (d *Database) GetTraders(userID string) ([]*TraderRecord, error) {
 			&trader.CustomPrompt, &trader.OverrideBasePrompt, &trader.SystemPromptTemplate,
 			&trader.IsCrossMargin,
 			&trader.TakerFeeRate, &trader.MakerFeeRate,
+			&trader.OrderStrategy, &trader.LimitPriceOffset, &trader.LimitTimeoutSeconds,
 			&trader.CreatedAt, &trader.UpdatedAt,
 		)
 		if err != nil {
