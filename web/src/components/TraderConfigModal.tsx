@@ -42,6 +42,7 @@ interface TraderConfigModalProps {
   isEditMode?: boolean
   availableModels?: AIModel[]
   availableExchanges?: Exchange[]
+  existingTraderCount?: number
   onSave?: (data: CreateTraderRequest) => Promise<void>
 }
 
@@ -52,9 +53,18 @@ export function TraderConfigModal({
   isEditMode = false,
   availableModels = [],
   availableExchanges = [],
+  existingTraderCount = 0,
   onSave,
 }: TraderConfigModalProps) {
   const { language } = useLanguage()
+
+  // Generate smart default trader name
+  const generateDefaultName = () => {
+    const modelName = availableModels[0]?.name || 'AI'
+    const exchangeName = availableExchanges[0]?.name?.split(' ')[0] || 'Exchange'
+    const nextNumber = existingTraderCount + 1
+    return `${modelName}-${exchangeName}-${nextNumber}`
+  }
   const [formData, setFormData] = useState<TraderConfigData>({
     trader_name: '',
     ai_model: '',
@@ -104,7 +114,7 @@ export function TraderConfigModal({
       }
     } else if (!isEditMode) {
       setFormData({
-        trader_name: '',
+        trader_name: generateDefaultName(),
         ai_model: availableModels[0]?.id || '',
         exchange_id: availableExchanges[0]?.id || '',
         btc_eth_leverage: 5,
@@ -353,7 +363,8 @@ export function TraderConfigModal({
             <div className="space-y-4">
               <div>
                 <label className="text-sm text-[#EAECEF] block mb-2">
-                  交易员名称
+                  {language === 'zh' ? '交易员名称' : 'Trader Name'}{' '}
+                  <span className="text-[#F6465D]">*</span>
                 </label>
                 <input
                   type="text"
@@ -362,7 +373,8 @@ export function TraderConfigModal({
                     handleInputChange('trader_name', e.target.value)
                   }
                   className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                  placeholder="请输入交易员名称"
+                  placeholder={language === 'zh' ? '例如: DeepSeek-Binance-1' : 'e.g., DeepSeek-Binance-1'}
+                  required
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">

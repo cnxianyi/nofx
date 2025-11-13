@@ -1463,6 +1463,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           isEditMode={false}
           availableModels={enabledModels}
           availableExchanges={enabledExchanges}
+          existingTraderCount={traders?.length || 0}
           onSave={handleCreateTrader}
           onClose={() => setShowCreateModal(false)}
         />
