@@ -1937,7 +1937,7 @@ function ModelConfigModal({
                     <input
                       type={showApiKey ? 'text' : 'password'}
                       value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value.trim())}
+                      onChange={(e) => setApiKey(e.target.value)}
                       placeholder={t('enterAPIKey', language)}
                       className="w-full px-3 py-2 pr-10 rounded"
                       style={{
@@ -2554,7 +2554,7 @@ function ExchangeConfigModal({
                           <input
                             type={showApiKey ? 'text' : 'password'}
                             value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value.trim())}
+                            onChange={(e) => setApiKey(e.target.value)}
                             placeholder={t('enterAPIKey', language)}
                             className="w-full px-3 py-2 pr-10 rounded"
                             style={{
@@ -2587,7 +2587,7 @@ function ExchangeConfigModal({
                           <input
                             type={showSecretKey ? 'text' : 'password'}
                             value={secretKey}
-                            onChange={(e) => setSecretKey(e.target.value.trim())}
+                            onChange={(e) => setSecretKey(e.target.value)}
                             placeholder={t('enterSecretKey', language)}
                             className="w-full px-3 py-2 pr-10 rounded"
                             style={{
@@ -2813,7 +2813,7 @@ function ExchangeConfigModal({
                         <input
                           type={showAsterPrivateKey ? 'text' : 'password'}
                           value={asterPrivateKey}
-                          onChange={(e) => setAsterPrivateKey(e.target.value.trim())}
+                          onChange={(e) => setAsterPrivateKey(e.target.value)}
                           placeholder={t('enterPrivateKey', language)}
                           className="w-full px-3 py-2 pr-10 rounded"
                           style={{
