@@ -118,12 +118,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const { data: allModels, mutate: mutateModels } = useSWR<AIModel[]>(
     user && token ? 'models' : null,
-    api.getModelConfigs
+    api.getModelConfigs,
+    { refreshInterval: 5000 }
   )
 
   const { data: allExchanges, mutate: mutateExchanges } = useSWR<Exchange[]>(
     user && token ? 'exchanges' : null,
-    api.getExchangeConfigs
+    api.getExchangeConfigs,
+    { refreshInterval: 5000 }
   )
 
   // 加载支持的模型和交易所列表（用于选择）
