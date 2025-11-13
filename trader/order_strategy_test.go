@@ -807,12 +807,78 @@ func TestOrderStrategy_ParameterValidation(t *testing.T) {
 func TestOrderStrategy_ShortPosition(t *testing.T) {
 	// Mock server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/fapi/v1/ticker/price" {
+		// Mock initialization endpoints
+		if r.URL.Path == "/fapi/v1/time" {
 			response := map[string]interface{}{
-				"symbol": "ETHUSDT",
-				"price":  "3000.0",
+				"serverTime": time.Now().UnixMilli(),
 			}
 			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if r.URL.Path == "/fapi/v1/positionSide/dual" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"code": 200,
+				"msg":  "success",
+			})
+			return
+		}
+
+		if r.URL.Path == "/fapi/v1/leverage" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"leverage": 10,
+				"symbol":   "ETHUSDT",
+			})
+			return
+		}
+
+		if r.URL.Path == "/fapi/v1/allOpenOrders" && r.Method == "DELETE" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"code": 200,
+				"msg":  "success",
+			})
+			return
+		}
+
+		if r.URL.Path == "/fapi/v2/positionRisk" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{})
+			return
+		}
+
+		if r.URL.Path == "/fapi/v1/exchangeInfo" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"symbols": []map[string]interface{}{
+					{
+						"symbol": "ETHUSDT",
+						"filters": []map[string]interface{}{
+							{
+								"filterType": "LOT_SIZE",
+								"stepSize":   "0.001",
+							},
+							{
+								"filterType": "PRICE_FILTER",
+								"tickSize":   "0.01",
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+
+		if r.URL.Path == "/fapi/v2/ticker/price" || r.URL.Path == "/fapi/v1/ticker/price" {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"symbol": "ETHUSDT",
+					"price":  "3000.0",
+				},
+			})
 			return
 		}
 
@@ -835,9 +901,13 @@ func TestOrderStrategy_ShortPosition(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	trader := NewFuturesTrader("test_key", "test_secret", "test_user", "limit_only", 0.03, 60)
-	trader.client.BaseURL = mockServer.URL
-	trader.client.HTTPClient = mockServer.Client()
+	// Create a client configured to use the mock server
+	client := futures.NewClient("test_key", "test_secret")
+	client.BaseURL = mockServer.URL
+	client.HTTPClient = mockServer.Client()
+
+	// Create trader with the mocked client
+	trader := newFuturesTraderWithClient(client, "limit_only", 0.03, 60)
 
 	// 測試開空倉
 	result, err := trader.OpenShort("ETHUSDT", 100.0, 10)
@@ -847,7 +917,7 @@ func TestOrderStrategy_ShortPosition(t *testing.T) {
 
 	orderID, ok := result["orderId"].(int64)
 	if !ok || orderID != 12351 {
-		t.Errorf("預期 OrderID=12351, 實際 %v", result["orderId"])
+		t.Fatalf("預期 OrderID=12351, 實際 %v (type: %T)", result["orderId"], result["orderId"])
 	}
 
 	t.Logf("✅ 做空倉位訂單策略測試通過")
