@@ -357,19 +357,32 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       if (!ok) return
     }
 
+    // Save previous state for rollback
+    const previousTraders = traders
+
     try {
+      // Optimistic update - immediately remove from UI
+      mutateTraders(
+        traders?.filter((t) => t.trader_id !== traderId),
+        false
+      )
+
       await toast.promise(api.deleteTrader(traderId), {
         loading: '正在删除…',
         success: '删除成功',
         error: '删除失败',
       })
 
-      // Immediately refresh traders list for better UX
+      // Revalidate to ensure data consistency
       await mutateTraders()
 
       cacheManager.onTraderDeleted(traderId)
     } catch (error) {
       console.error('Failed to delete trader:', error)
+
+      // Rollback on error
+      mutateTraders(previousTraders, false)
+
       toast.error(t('deleteTraderFailed', language))
     }
   }
@@ -426,7 +439,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     clearFields: (item: T) => T
     buildRequest: (items: T[]) => any
     updateApi: (request: any) => Promise<void>
-    setItems: () => Promise<void>
+    setItems: (data?: T[] | Promise<T[]>, shouldRevalidate?: boolean) => Promise<T[] | undefined>
     closeModal: () => void
     errorKey: string
   }) => {
@@ -445,11 +458,17 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       if (!ok) return
     }
 
+    // Save previous state for rollback
+    const previousItems = config.allItems
+
     try {
       const updatedItems =
         config.allItems?.map((item) =>
           item.id === config.id ? config.clearFields(item) : item
         ) || []
+
+      // Optimistic update - immediately update UI
+      config.setItems(updatedItems, false)
 
       const request = config.buildRequest(updatedItems)
       await toast.promise(config.updateApi(request), {
@@ -458,12 +477,16 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         error: '更新配置失败',
       })
 
-      // 使用 SWR mutate 自动刷新数据（等待刷新完成）
+      // Revalidate to ensure data consistency
       await config.setItems()
 
       config.closeModal()
     } catch (error) {
       console.error(`Failed to delete ${config.type} config:`, error)
+
+      // Rollback on error
+      config.setItems(previousItems, false)
+
       toast.error(t(config.errorKey, language))
     }
   }
@@ -498,9 +521,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         ),
       }),
       updateApi: api.updateModelConfigs,
-      setItems: async () => {
-        await mutateModels() // 等待刷新完成
-      },
+      setItems: mutateModels,
       closeModal: () => {
         setShowModelModal(false)
         setEditingModel(null)
@@ -622,9 +643,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         ),
       }),
       updateApi: api.updateExchangeConfigsEncrypted,
-      setItems: async () => {
-        await mutateExchanges() // 等待刷新完成
-      },
+      setItems: mutateExchanges,
       closeModal: () => {
         setShowExchangeModal(false)
         setEditingExchange(null)
