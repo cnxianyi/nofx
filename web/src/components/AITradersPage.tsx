@@ -905,15 +905,15 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               return (
                 <div
                   key={model.id}
-                  className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${
-                    inUse
-                      ? 'cursor-not-allowed'
-                      : 'cursor-pointer hover:bg-gray-700'
-                  }`}
+                  className="flex items-center justify-between p-2 md:p-3 rounded transition-all"
                   style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-                  onClick={() => handleModelClick(model.id)}
                 >
-                  <div className="flex items-center gap-2 md:gap-3">
+                  <div
+                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${
+                      inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
+                    }`}
+                    onClick={() => !inUse && handleModelClick(model.id)}
+                  >
                     <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
                       {getModelIcon(model.provider || model.id, {
                         width: 28,
@@ -947,9 +947,23 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       </div>
                     </div>
                   </div>
-                  <div
-                    className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${model.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
-                  />
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div
+                      className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${model.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
+                    />
+                    <button
+                      onClick={() => handleDeleteModelConfig(model.id)}
+                      disabled={inUse}
+                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{
+                        background: 'rgba(246, 70, 93, 0.1)',
+                        color: '#F6465D',
+                      }}
+                      title={inUse ? t('cannotDelete', language) : t('delete', language)}
+                    >
+                      <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -1035,15 +1049,15 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               return (
                 <div
                   key={exchange.id}
-                  className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${
-                    inUse
-                      ? 'cursor-not-allowed'
-                      : 'cursor-pointer hover:bg-gray-700'
-                  }`}
+                  className="flex items-center justify-between p-2 md:p-3 rounded transition-all"
                   style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-                  onClick={() => handleExchangeClick(exchange.id)}
                 >
-                  <div className="flex items-center gap-2 md:gap-3">
+                  <div
+                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${
+                      inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
+                    }`}
+                    onClick={() => !inUse && handleExchangeClick(exchange.id)}
+                  >
                     <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
                       {getExchangeIcon(exchange.id, { width: 28, height: 28 })}
                     </div>
@@ -1064,9 +1078,27 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       </div>
                     </div>
                   </div>
-                  <div
-                    className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${exchange.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
-                  />
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div
+                      className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${exchange.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
+                    />
+                    <button
+                      onClick={() => handleDeleteExchangeConfig(exchange.id)}
+                      disabled={inUse}
+                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{
+                        background: 'rgba(246, 70, 93, 0.1)',
+                        color: '#F6465D',
+                      }}
+                      title={
+                        inUse
+                          ? t('cannotDelete', language)
+                          : t('delete', language)
+                      }
+                    >
+                      <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -1950,8 +1982,13 @@ function ModelConfigModal({
                     <button
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded hover:bg-gray-700 transition-colors"
-                      style={{ color: '#848E9C' }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors"
+                      style={{
+                        color: '#848E9C',
+                        background: 'transparent'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(43, 49, 57, 0.6)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                       title={showApiKey ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
                     >
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -2567,8 +2604,13 @@ function ExchangeConfigModal({
                           <button
                             type="button"
                             onClick={() => setShowApiKey(!showApiKey)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded hover:bg-gray-700 transition-colors"
-                            style={{ color: '#848E9C' }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors"
+                            style={{
+                              color: '#848E9C',
+                              background: 'transparent'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(43, 49, 57, 0.6)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                             title={showApiKey ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
                           >
                             {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -2600,8 +2642,13 @@ function ExchangeConfigModal({
                           <button
                             type="button"
                             onClick={() => setShowSecretKey(!showSecretKey)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded hover:bg-gray-700 transition-colors"
-                            style={{ color: '#848E9C' }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors"
+                            style={{
+                              color: '#848E9C',
+                              background: 'transparent'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(43, 49, 57, 0.6)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                             title={showSecretKey ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
                           >
                             {showSecretKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -2826,8 +2873,13 @@ function ExchangeConfigModal({
                         <button
                           type="button"
                           onClick={() => setShowAsterPrivateKey(!showAsterPrivateKey)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded hover:bg-gray-700 transition-colors"
-                          style={{ color: '#848E9C' }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors"
+                          style={{
+                            color: '#848E9C',
+                            background: 'transparent'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(43, 49, 57, 0.6)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           title={showAsterPrivateKey ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
                         >
                           {showAsterPrivateKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
