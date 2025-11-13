@@ -490,6 +490,7 @@ type TraderRecord struct {
 	IsCrossMargin        bool      `json:"is_cross_margin"`        // 是否为全仓模式（true=全仓，false=逐仓）
 	TakerFeeRate         float64   `json:"taker_fee_rate"`         // Taker fee rate, default 0.0004
 	MakerFeeRate         float64   `json:"maker_fee_rate"`         // Maker fee rate, default 0.0002
+	Timeframes           string    `json:"timeframes"`             // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }

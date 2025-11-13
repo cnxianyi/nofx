@@ -391,6 +391,7 @@ type CreateTraderRequest struct {
 	UseOITop             bool    `json:"use_oi_top"`
 	TakerFeeRate         float64 `json:"taker_fee_rate"` // Taker fee rate, default 0.0004 (0.04%)
 	MakerFeeRate         float64 `json:"maker_fee_rate"` // Maker fee rate, default 0.0002 (0.02%)
+	Timeframes           string  `json:"timeframes"`     // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
 }
 
 type ModelConfig struct {
@@ -663,6 +664,12 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 	log.Printf("✓ 费率配置: Taker=%.4f (%.2f%%), Maker=%.4f (%.2f%%)",
 		takerFeeRate, takerFeeRate*100, makerFeeRate, makerFeeRate*100)
 
+	// 设置时间线默认值
+	timeframes := req.Timeframes
+	if timeframes == "" {
+		timeframes = "4h" // 默认只勾选4小时线
+	}
+
 	// 创建交易员配置（数据库实体）
 	trader := &config.TraderRecord{
 		ID:                   traderID,
@@ -683,6 +690,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		ScanIntervalMinutes:  scanIntervalMinutes,
 		TakerFeeRate:         takerFeeRate, // 添加 Taker 费率
 		MakerFeeRate:         makerFeeRate, // 添加 Maker 费率
+		Timeframes:           timeframes,   // 添加时间线选择
 		IsRunning:            false,
 	}
 
