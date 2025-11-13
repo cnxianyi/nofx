@@ -629,6 +629,11 @@ func TestSynchronousMode(t *testing.T) {
 // TestDataPersistenceAcrossReopen 测试数据在数据库关闭并重新打开后是否持久化
 // TDD: 模拟 Docker restart 场景
 func TestDataPersistenceAcrossReopen(t *testing.T) {
+	// Skip test if DATA_ENCRYPTION_KEY environment variable is not set
+	if os.Getenv("DATA_ENCRYPTION_KEY") == "" {
+		t.Skip("Skipping encryption test: DATA_ENCRYPTION_KEY not set")
+	}
+
 	// 创建临时数据库文件
 	tmpFile, err := os.CreateTemp("", "test_persistence_*.db")
 	if err != nil {
