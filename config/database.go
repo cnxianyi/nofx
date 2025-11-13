@@ -258,6 +258,9 @@ func (d *Database) createTables() error {
 		`ALTER TABLE traders ADD COLUMN system_prompt_template TEXT DEFAULT 'default'`, // 系统提示词模板名称
 		`ALTER TABLE traders ADD COLUMN taker_fee_rate REAL DEFAULT 0.0004`,            // Taker fee rate, default 0.0004
 		`ALTER TABLE traders ADD COLUMN maker_fee_rate REAL DEFAULT 0.0002`,            // Maker fee rate, default 0.0002
+		`ALTER TABLE traders ADD COLUMN order_strategy TEXT DEFAULT 'market_only'`,     // Order strategy: market_only, conservative_hybrid, limit_only
+		`ALTER TABLE traders ADD COLUMN limit_price_offset REAL DEFAULT -0.03`,         // Limit order price offset percentage (e.g., -0.03 for -0.03%)
+		`ALTER TABLE traders ADD COLUMN limit_timeout_seconds INTEGER DEFAULT 60`,      // Timeout in seconds before converting to market order
 		`ALTER TABLE ai_models ADD COLUMN custom_api_url TEXT DEFAULT ''`,              // 自定义API地址
 		`ALTER TABLE ai_models ADD COLUMN custom_model_name TEXT DEFAULT ''`,           // 自定义模型名称
 	}
@@ -271,6 +274,12 @@ func (d *Database) createTables() error {
 	err := d.migrateExchangesTable()
 	if err != nil {
 		log.Printf("⚠️ 迁移exchanges表失败: %v", err)
+	}
+
+	// 迁移到自增ID结构（支持多配置）
+	err = d.migrateToAutoIncrementID()
+	if err != nil {
+		log.Printf("⚠️ 迁移自增ID失败: %v", err)
 	}
 
 	return nil
@@ -424,6 +433,276 @@ func (d *Database) migrateExchangesTable() error {
 	return nil
 }
 
+// migrateToAutoIncrementID 迁移到自增ID结构（支持多配置）
+func (d *Database) migrateToAutoIncrementID() error {
+	// 检查是否已经迁移过（通过检查 ai_models 表是否有 model_id 列）
+	var count int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('ai_models')
+		WHERE name = 'model_id'
+	`).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("检查迁移状态失败: %w", err)
+	}
+
+	// 如果已经迁移过，直接返回
+	if count > 0 {
+		return nil
+	}
+
+	log.Printf("🔄 开始迁移到自增ID结构（支持多配置）...")
+
+	// === 步骤1：迁移 ai_models 表 ===
+	if err := d.migrateAIModelsTable(); err != nil {
+		return fmt.Errorf("迁移 ai_models 表失败: %w", err)
+	}
+
+	// === 步骤2：迁移 exchanges 表（再次，改为自增ID） ===
+	if err := d.migrateExchangesTableToAutoIncrement(); err != nil {
+		return fmt.Errorf("迁移 exchanges 表到自增ID失败: %w", err)
+	}
+
+	log.Printf("✅ 自增ID结构迁移完成")
+	return nil
+}
+
+// migrateAIModelsTable 迁移 ai_models 表到自增ID结构
+func (d *Database) migrateAIModelsTable() error {
+	log.Printf("  🔄 迁移 ai_models 表...")
+
+	// 1. 创建新表
+	_, err := d.db.Exec(`
+		CREATE TABLE ai_models_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			model_id TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT 'default',
+			display_name TEXT DEFAULT '',
+			name TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			enabled BOOLEAN DEFAULT 0,
+			api_key TEXT DEFAULT '',
+			custom_api_url TEXT DEFAULT '',
+			custom_model_name TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("创建新表失败: %w", err)
+	}
+
+	// 2. 迁移数据：从旧ID中提取 model_id
+	// 旧ID格式："{user_id}_{model_id}" 或 "{model_id}"（default用户）
+	rows, err := d.db.Query(`SELECT id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at FROM ai_models`)
+	if err != nil {
+		return fmt.Errorf("查询旧数据失败: %w", err)
+	}
+	defer rows.Close()
+
+	// 创建映射表：旧ID -> 新ID
+	oldToNewID := make(map[string]int)
+
+	for rows.Next() {
+		var oldID, userID, name, provider, apiKey, customAPIURL, customModelName string
+		var enabled bool
+		var createdAt, updatedAt time.Time
+
+		if err := rows.Scan(&oldID, &userID, &name, &provider, &enabled, &apiKey, &customAPIURL, &customModelName, &createdAt, &updatedAt); err != nil {
+			return fmt.Errorf("读取数据失败: %w", err)
+		}
+
+		// 提取 model_id：去掉前缀 "{user_id}_"
+		modelID := oldID
+		if strings.HasPrefix(oldID, userID+"_") {
+			modelID = strings.TrimPrefix(oldID, userID+"_")
+		}
+
+		// 插入新表
+		result, err := d.db.Exec(`
+			INSERT INTO ai_models_new (model_id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, modelID, userID, name, provider, enabled, apiKey, customAPIURL, customModelName, createdAt, updatedAt)
+		if err != nil {
+			return fmt.Errorf("插入数据失败: %w", err)
+		}
+
+		// 获取新ID
+		newID, _ := result.LastInsertId()
+		oldToNewID[oldID] = int(newID)
+	}
+
+	// 3. 更新 traders 表中的 ai_model_id（使用临时列）
+	_, err = d.db.Exec(`ALTER TABLE traders ADD COLUMN ai_model_id_new INTEGER`)
+	if err != nil {
+		return fmt.Errorf("添加临时列失败: %w", err)
+	}
+
+	// 更新外键引用
+	for oldID, newID := range oldToNewID {
+		_, err = d.db.Exec(`UPDATE traders SET ai_model_id_new = ? WHERE ai_model_id = ?`, newID, oldID)
+		if err != nil {
+			return fmt.Errorf("更新 traders 外键失败: %w", err)
+		}
+	}
+
+	// 4. 删除旧表
+	_, err = d.db.Exec(`DROP TABLE ai_models`)
+	if err != nil {
+		return fmt.Errorf("删除旧表失败: %w", err)
+	}
+
+	// 5. 重命名新表
+	_, err = d.db.Exec(`ALTER TABLE ai_models_new RENAME TO ai_models`)
+	if err != nil {
+		return fmt.Errorf("重命名表失败: %w", err)
+	}
+
+	// 6. 更新 traders 表的列名
+	_, err = d.db.Exec(`ALTER TABLE traders RENAME COLUMN ai_model_id TO ai_model_id_old`)
+	if err != nil {
+		return fmt.Errorf("重命名旧列失败: %w", err)
+	}
+	_, err = d.db.Exec(`ALTER TABLE traders RENAME COLUMN ai_model_id_new TO ai_model_id`)
+	if err != nil {
+		return fmt.Errorf("重命名新列失败: %w", err)
+	}
+
+	// 7. 重新创建触发器
+	_, err = d.db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS update_ai_models_updated_at
+			AFTER UPDATE ON ai_models
+			BEGIN
+				UPDATE ai_models SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+			END
+	`)
+	if err != nil {
+		return fmt.Errorf("创建触发器失败: %w", err)
+	}
+
+	log.Printf("  ✅ ai_models 表迁移完成，共迁移 %d 条记录", len(oldToNewID))
+	return nil
+}
+
+// migrateExchangesTableToAutoIncrement 迁移 exchanges 表到自增ID结构
+func (d *Database) migrateExchangesTableToAutoIncrement() error {
+	log.Printf("  🔄 迁移 exchanges 表到自增ID...")
+
+	// 1. 创建新表
+	_, err := d.db.Exec(`
+		CREATE TABLE exchanges_new2 (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			exchange_id TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT 'default',
+			display_name TEXT DEFAULT '',
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			enabled BOOLEAN DEFAULT 0,
+			api_key TEXT DEFAULT '',
+			secret_key TEXT DEFAULT '',
+			testnet BOOLEAN DEFAULT 0,
+			hyperliquid_wallet_addr TEXT DEFAULT '',
+			aster_user TEXT DEFAULT '',
+			aster_signer TEXT DEFAULT '',
+			aster_private_key TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("创建新表失败: %w", err)
+	}
+
+	// 2. 迁移数据
+	rows, err := d.db.Query(`SELECT id, user_id, name, type, enabled, api_key, secret_key, testnet, hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at FROM exchanges`)
+	if err != nil {
+		return fmt.Errorf("查询旧数据失败: %w", err)
+	}
+	defer rows.Close()
+
+	// 创建映射：(旧exchange_id, user_id) -> 新ID
+	type OldKey struct {
+		ExchangeID string
+		UserID     string
+	}
+	oldToNewID := make(map[OldKey]int)
+
+	for rows.Next() {
+		var exchangeID, userID, name, typeStr, apiKey, secretKey, hyperliquidAddr, asterUser, asterSigner, asterKey string
+		var enabled, testnet bool
+		var createdAt, updatedAt time.Time
+
+		if err := rows.Scan(&exchangeID, &userID, &name, &typeStr, &enabled, &apiKey, &secretKey, &testnet, &hyperliquidAddr, &asterUser, &asterSigner, &asterKey, &createdAt, &updatedAt); err != nil {
+			return fmt.Errorf("读取数据失败: %w", err)
+		}
+
+		// 插入新表
+		result, err := d.db.Exec(`
+			INSERT INTO exchanges_new2 (exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet, hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, exchangeID, userID, name, typeStr, enabled, apiKey, secretKey, testnet, hyperliquidAddr, asterUser, asterSigner, asterKey, createdAt, updatedAt)
+		if err != nil {
+			return fmt.Errorf("插入数据失败: %w", err)
+		}
+
+		// 获取新ID
+		newID, _ := result.LastInsertId()
+		oldToNewID[OldKey{exchangeID, userID}] = int(newID)
+	}
+
+	// 3. 更新 traders 表中的 exchange_id
+	_, err = d.db.Exec(`ALTER TABLE traders ADD COLUMN exchange_id_new INTEGER`)
+	if err != nil {
+		return fmt.Errorf("添加临时列失败: %w", err)
+	}
+
+	// 更新外键引用（需要同时匹配 exchange_id 和 user_id）
+	for key, newID := range oldToNewID {
+		_, err = d.db.Exec(`UPDATE traders SET exchange_id_new = ? WHERE exchange_id = ? AND user_id = ?`, newID, key.ExchangeID, key.UserID)
+		if err != nil {
+			return fmt.Errorf("更新 traders 外键失败: %w", err)
+		}
+	}
+
+	// 4. 删除旧表
+	_, err = d.db.Exec(`DROP TABLE exchanges`)
+	if err != nil {
+		return fmt.Errorf("删除旧表失败: %w", err)
+	}
+
+	// 5. 重命名新表
+	_, err = d.db.Exec(`ALTER TABLE exchanges_new2 RENAME TO exchanges`)
+	if err != nil {
+		return fmt.Errorf("重命名表失败: %w", err)
+	}
+
+	// 6. 更新 traders 表的列名
+	_, err = d.db.Exec(`ALTER TABLE traders RENAME COLUMN exchange_id TO exchange_id_old`)
+	if err != nil {
+		return fmt.Errorf("重命名旧列失败: %w", err)
+	}
+	_, err = d.db.Exec(`ALTER TABLE traders RENAME COLUMN exchange_id_new TO exchange_id`)
+	if err != nil {
+		return fmt.Errorf("重命名新列失败: %w", err)
+	}
+
+	// 7. 重新创建触发器
+	_, err = d.db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS update_exchanges_updated_at
+			AFTER UPDATE ON exchanges
+			BEGIN
+				UPDATE exchanges SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+			END
+	`)
+	if err != nil {
+		return fmt.Errorf("创建触发器失败: %w", err)
+	}
+
+	log.Printf("  ✅ exchanges 表迁移完成，共迁移 %d 条记录", len(oldToNewID))
+	return nil
+}
+
 // User 用户配置
 type User struct {
 	ID           string    `json:"id"`
@@ -437,8 +716,10 @@ type User struct {
 
 // AIModelConfig AI模型配置
 type AIModelConfig struct {
-	ID              string    `json:"id"`
+	ID              int       `json:"id"`              // 自增ID（主键）
+	ModelID         string    `json:"model_id"`        // 模型类型ID（例如 "deepseek"）
 	UserID          string    `json:"user_id"`
+	DisplayName     string    `json:"display_name"`    // 用户自定义显示名称
 	Name            string    `json:"name"`
 	Provider        string    `json:"provider"`
 	Enabled         bool      `json:"enabled"`
@@ -451,14 +732,16 @@ type AIModelConfig struct {
 
 // ExchangeConfig 交易所配置
 type ExchangeConfig struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Enabled   bool   `json:"enabled"`
-	APIKey    string `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
-	SecretKey string `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
-	Testnet   bool   `json:"testnet"`
+	ID         int    `json:"id"`          // 自增ID（主键）
+	ExchangeID string `json:"exchange_id"` // 交易所类型ID（例如 "binance"）
+	UserID     string `json:"user_id"`
+	DisplayName string `json:"display_name"` // 用户自定义显示名称
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Enabled    bool   `json:"enabled"`
+	APIKey     string `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
+	SecretKey  string `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
+	Testnet    bool   `json:"testnet"`
 	// Hyperliquid Agent Wallet configuration (following official best practices)
 	// Reference: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets
 	HyperliquidWalletAddr string `json:"hyperliquidWalletAddr"` // Main Wallet Address (holds funds, never expose private key)
@@ -475,8 +758,8 @@ type TraderRecord struct {
 	ID                   string    `json:"id"`
 	UserID               string    `json:"user_id"`
 	Name                 string    `json:"name"`
-	AIModelID            string    `json:"ai_model_id"`
-	ExchangeID           string    `json:"exchange_id"`
+	AIModelID            int       `json:"ai_model_id"`   // 外键：指向 ai_models.id
+	ExchangeID           int       `json:"exchange_id"`   // 外键：指向 exchanges.id
 	InitialBalance       float64   `json:"initial_balance"`
 	ScanIntervalMinutes  int       `json:"scan_interval_minutes"`
 	IsRunning            bool      `json:"is_running"`

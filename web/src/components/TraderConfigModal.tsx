@@ -27,9 +27,12 @@ interface TraderConfigData {
   use_oi_top: boolean
   initial_balance: number
   scan_interval_minutes: number
-  taker_fee_rate: number  // Taker 费率 (默认 0.0004 = 0.04%)
-  maker_fee_rate: number  // Maker 费率 (默认 0.0002 = 0.02%)
-  timeframes: string      // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
+  taker_fee_rate: number     // Taker 费率 (默认 0.0004 = 0.04%)
+  maker_fee_rate: number     // Maker 费率 (默认 0.0002 = 0.02%)
+  timeframes: string         // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
+  order_strategy: string     // Order strategy: "market_only", "conservative_hybrid", "limit_only"
+  limit_price_offset: number // Limit order price offset percentage (e.g., -0.03 for -0.03%)
+  limit_timeout_seconds: number // Timeout in seconds before converting to market order
 }
 
 interface TraderConfigModalProps {
@@ -67,9 +70,12 @@ export function TraderConfigModal({
     use_oi_top: false,
     initial_balance: 100,
     scan_interval_minutes: 3,
-    taker_fee_rate: 0.0004, // 默认 Binance Taker 费率 (0.04%)
-    maker_fee_rate: 0.0002, // 默认 Binance Maker 费率 (0.02%)
-    timeframes: '4h',       // 默认只勾选 4 小时线
+    taker_fee_rate: 0.0004,        // 默认 Binance Taker 费率 (0.04%)
+    maker_fee_rate: 0.0002,        // 默认 Binance Maker 费率 (0.02%)
+    timeframes: '4h',              // 默认只勾选 4 小时线
+    order_strategy: 'conservative_hybrid', // 默认使用保守混合策略
+    limit_price_offset: -0.03,     // 默认 -0.03% 限价偏移
+    limit_timeout_seconds: 60,     // 默认 60 秒超时
   })
   const [isSaving, setIsSaving] = useState(false)
   const [availableCoins, setAvailableCoins] = useState<string[]>([])
@@ -667,6 +673,118 @@ export function TraderConfigModal({
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     默认 0.02% (Binance 标准费率)
+                  </p>
+                </div>
+              </div>
+
+              {/* 订单策略设置 */}
+              <div>
+                <label className="text-sm text-[#EAECEF] block mb-3">
+                  📋 订单策略
+                </label>
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('order_strategy', 'market_only')}
+                    className={`px-3 py-2 rounded text-sm ${
+                      formData.order_strategy === 'market_only'
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                    }`}
+                  >
+                    仅市价单
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('order_strategy', 'conservative_hybrid')}
+                    className={`px-3 py-2 rounded text-sm ${
+                      formData.order_strategy === 'conservative_hybrid'
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                    }`}
+                  >
+                    保守混合
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('order_strategy', 'limit_only')}
+                    className={`px-3 py-2 rounded text-sm ${
+                      formData.order_strategy === 'limit_only'
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                    }`}
+                  >
+                    仅限价单
+                  </button>
+                </div>
+
+                {/* 限价偏移和超时设置（仅在非纯市价模式下显示） */}
+                {formData.order_strategy !== 'market_only' && (
+                  <div className="grid grid-cols-2 gap-4 mt-3">
+                    <div>
+                      <label className="text-sm text-[#EAECEF] block mb-2">
+                        限价偏移 (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.limit_price_offset}
+                        onChange={(e) =>
+                          handleInputChange('limit_price_offset', Number(e.target.value))
+                        }
+                        className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                        min="-1"
+                        max="0"
+                        step="0.01"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        负数表示优于市价（例如 -0.03 = 市价的 -0.03%）
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-sm text-[#EAECEF] block mb-2">
+                        超时转换 (秒)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.limit_timeout_seconds}
+                        onChange={(e) =>
+                          handleInputChange('limit_timeout_seconds', Number(e.target.value))
+                        }
+                        className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                        min="10"
+                        max="300"
+                        step="10"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        限价单未成交时，自动转为市价单的等待时间
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-3 p-3 bg-[#1E2329] rounded-lg border border-[#2B3139]">
+                  <p className="text-xs text-[#848E9C]">
+                    {formData.order_strategy === 'market_only' && (
+                      <>
+                        <span className="text-[#F0B90B] font-medium">仅市价单：</span>
+                        100% 成交率，立即执行，手续费较高（Taker 费率 {(formData.taker_fee_rate * 100).toFixed(2)}%）
+                      </>
+                    )}
+                    {formData.order_strategy === 'conservative_hybrid' && (
+                      <>
+                        <span className="text-[#F0B90B] font-medium">保守混合：</span>
+                        先尝试限价单（Maker 费率 {(formData.maker_fee_rate * 100).toFixed(2)}%），
+                        {formData.limit_timeout_seconds}秒未成交后自动转为市价单。
+                        预计 85-90% 成交率，节省约 0.02% 手续费
+                      </>
+                    )}
+                    {formData.order_strategy === 'limit_only' && (
+                      <>
+                        <span className="text-[#F0B90B] font-medium">仅限价单：</span>
+                        仅使用限价单（Maker 费率 {(formData.maker_fee_rate * 100).toFixed(2)}%），
+                        不会自动转为市价单。成交率取决于市场流动性和偏移设置
+                      </>
+                    )}
                   </p>
                 </div>
               </div>

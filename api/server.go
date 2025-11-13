@@ -466,7 +466,8 @@ func (s *Server) queryExchangeBalance(userID, exchangeID string, exchangeCfg *co
 
 	switch exchangeID {
 	case "binance":
-		tempTrader = trader.NewFuturesTrader(exchangeCfg.APIKey, exchangeCfg.SecretKey, userID)
+		// 使用默认订单策略（查询余额不需要实际下单）
+		tempTrader = trader.NewFuturesTrader(exchangeCfg.APIKey, exchangeCfg.SecretKey, userID, "market_only", -0.03, 60)
 	case "hyperliquid":
 		tempTrader, err = trader.NewHyperliquidTrader(
 			exchangeCfg.APIKey, // private key
@@ -612,7 +613,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 			// 查找匹配的交易所配置
 			var exchangeCfg *config.ExchangeConfig
 			for _, ex := range exchanges {
-				if ex.ID == req.ExchangeID {
+				if ex.ExchangeID == req.ExchangeID {
 					exchangeCfg = ex
 					break
 				}
@@ -670,13 +671,50 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		timeframes = "4h" // 默认只勾选4小时线
 	}
 
+	// 查询 AI Model 和 Exchange 的自增 ID
+	aiModels, err := s.database.GetAIModels(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取AI模型配置失败"})
+		return
+	}
+
+	var aiModelIntID int
+	for _, model := range aiModels {
+		if model.ModelID == req.AIModelID {
+			aiModelIntID = model.ID
+			break
+		}
+	}
+	if aiModelIntID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("AI模型 %s 不存在", req.AIModelID)})
+		return
+	}
+
+	exchanges, err := s.database.GetExchanges(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取交易所配置失败"})
+		return
+	}
+
+	var exchangeIntID int
+	for _, exchange := range exchanges {
+		if exchange.ExchangeID == req.ExchangeID {
+			exchangeIntID = exchange.ID
+			break
+		}
+	}
+	if exchangeIntID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("交易所 %s 不存在", req.ExchangeID)})
+		return
+	}
+
 	// 创建交易员配置（数据库实体）
 	trader := &config.TraderRecord{
 		ID:                   traderID,
 		UserID:               userID,
 		Name:                 req.Name,
-		AIModelID:            req.AIModelID,
-		ExchangeID:           req.ExchangeID,
+		AIModelID:            aiModelIntID,   // 使用查询到的自增 ID
+		ExchangeID:           exchangeIntID,  // 使用查询到的自增 ID
 		InitialBalance:       actualBalance, // 使用实际查询的余额
 		BTCETHLeverage:       btcEthLeverage,
 		AltcoinLeverage:      altcoinLeverage,
@@ -834,13 +872,50 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 			existingTrader.MakerFeeRate, makerFeeRate)
 	}
 
+	// 查询 AI Model 和 Exchange 的自增 ID
+	aiModels, err := s.database.GetAIModels(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取AI模型配置失败"})
+		return
+	}
+
+	var aiModelIntID int
+	for _, model := range aiModels {
+		if model.ModelID == req.AIModelID {
+			aiModelIntID = model.ID
+			break
+		}
+	}
+	if aiModelIntID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("AI模型 %s 不存在", req.AIModelID)})
+		return
+	}
+
+	exchanges, err := s.database.GetExchanges(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取交易所配置失败"})
+		return
+	}
+
+	var exchangeIntID int
+	for _, exchange := range exchanges {
+		if exchange.ExchangeID == req.ExchangeID {
+			exchangeIntID = exchange.ID
+			break
+		}
+	}
+	if exchangeIntID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("交易所 %s 不存在", req.ExchangeID)})
+		return
+	}
+
 	// 更新交易员配置
 	trader := &config.TraderRecord{
 		ID:                   traderID,
 		UserID:               userID,
 		Name:                 req.Name,
-		AIModelID:            req.AIModelID,
-		ExchangeID:           req.ExchangeID,
+		AIModelID:            aiModelIntID,   // 使用查询到的自增 ID
+		ExchangeID:           exchangeIntID,  // 使用查询到的自增 ID
 		InitialBalance:       req.InitialBalance,
 		BTCETHLeverage:       btcEthLeverage,
 		AltcoinLeverage:      altcoinLeverage,
@@ -1043,9 +1118,10 @@ func (s *Server) handleSyncBalance(c *gin.Context) {
 	var tempTrader trader.Trader
 	var createErr error
 
-	switch traderConfig.ExchangeID {
+	switch exchangeCfg.ExchangeID {
 	case "binance":
-		tempTrader = trader.NewFuturesTrader(exchangeCfg.APIKey, exchangeCfg.SecretKey, userID)
+		// 使用默认订单策略（查询余额不需要实际下单）
+		tempTrader = trader.NewFuturesTrader(exchangeCfg.APIKey, exchangeCfg.SecretKey, userID, "market_only", -0.03, 60)
 	case "hyperliquid":
 		tempTrader, createErr = trader.NewHyperliquidTrader(
 			exchangeCfg.APIKey,
@@ -1155,7 +1231,7 @@ func (s *Server) handleGetModelConfigs(c *gin.Context) {
 	safeModels := make([]SafeModelConfig, len(models))
 	for i, model := range models {
 		safeModels[i] = SafeModelConfig{
-			ID:              model.ID,
+			ID:              model.ModelID,  // 返回 model_id（例如 "deepseek"）而不是自增 ID
 			Name:            model.Name,
 			Provider:        model.Provider,
 			Enabled:         model.Enabled,
@@ -1250,7 +1326,7 @@ func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 	safeExchanges := make([]SafeExchangeConfig, len(exchanges))
 	for i, exchange := range exchanges {
 		safeExchanges[i] = SafeExchangeConfig{
-			ID:                    exchange.ID,
+			ID:                    exchange.ExchangeID,  // 返回 exchange_id（例如 "binance"）
 			Name:                  exchange.Name,
 			Type:                  exchange.Type,
 			Enabled:               exchange.Enabled,
@@ -2153,7 +2229,7 @@ func (s *Server) handleGetSupportedExchanges(c *gin.Context) {
 	safeExchanges := make([]SafeExchangeConfig, len(exchanges))
 	for i, exchange := range exchanges {
 		safeExchanges[i] = SafeExchangeConfig{
-			ID:                    exchange.ID,
+			ID:                    exchange.ExchangeID,  // 返回 exchange_id（例如 "binance"）
 			Name:                  exchange.Name,
 			Type:                  exchange.Type,
 			Enabled:               exchange.Enabled,
