@@ -1709,7 +1709,7 @@ func (d *Database) cleanupLegacyColumns() error {
 	}
 	defer tx.Rollback()
 
-	// Create new traders table without _old columns
+	// Create new traders table without _old columns but WITH all feature columns
 	_, err = tx.Exec(`
 		CREATE TABLE traders_new (
 			id TEXT PRIMARY KEY,
@@ -1725,6 +1725,18 @@ func (d *Database) cleanupLegacyColumns() error {
 			trading_symbols TEXT DEFAULT '',
 			use_coin_pool BOOLEAN DEFAULT 0,
 			use_oi_top BOOLEAN DEFAULT 0,
+			custom_prompt TEXT DEFAULT '',
+			override_base_prompt BOOLEAN DEFAULT 0,
+			system_prompt_template TEXT DEFAULT 'default',
+			is_cross_margin BOOLEAN DEFAULT 1,
+			use_default_coins BOOLEAN DEFAULT 1,
+			custom_coins TEXT DEFAULT '',
+			taker_fee_rate REAL DEFAULT 0.0004,
+			maker_fee_rate REAL DEFAULT 0.0002,
+			order_strategy TEXT DEFAULT 'conservative_hybrid',
+			limit_price_offset REAL DEFAULT -0.03,
+			limit_timeout_seconds INTEGER DEFAULT 60,
+			timeframes TEXT DEFAULT '4h',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1736,19 +1748,29 @@ func (d *Database) cleanupLegacyColumns() error {
 		return fmt.Errorf("failed to create new table: %w", err)
 	}
 
-	// Migrate data (only copy valid columns)
+	// Migrate data (copy all columns, use COALESCE for nullable fields)
 	_, err = tx.Exec(`
 		INSERT INTO traders_new (
 			id, user_id, name, ai_model_id, exchange_id,
 			initial_balance, scan_interval_minutes, is_running,
 			btc_eth_leverage, altcoin_leverage, trading_symbols,
-			use_coin_pool, use_oi_top, created_at, updated_at
+			use_coin_pool, use_oi_top,
+			custom_prompt, override_base_prompt, system_prompt_template,
+			is_cross_margin, use_default_coins, custom_coins,
+			taker_fee_rate, maker_fee_rate, order_strategy,
+			limit_price_offset, limit_timeout_seconds, timeframes,
+			created_at, updated_at
 		)
 		SELECT
 			id, user_id, name, ai_model_id, exchange_id,
 			initial_balance, scan_interval_minutes, is_running,
 			btc_eth_leverage, altcoin_leverage, trading_symbols,
-			use_coin_pool, use_oi_top, created_at, updated_at
+			use_coin_pool, use_oi_top,
+			COALESCE(custom_prompt, ''), COALESCE(override_base_prompt, 0), COALESCE(system_prompt_template, 'default'),
+			COALESCE(is_cross_margin, 1), COALESCE(use_default_coins, 1), COALESCE(custom_coins, ''),
+			COALESCE(taker_fee_rate, 0.0004), COALESCE(maker_fee_rate, 0.0002), COALESCE(order_strategy, 'conservative_hybrid'),
+			COALESCE(limit_price_offset, -0.03), COALESCE(limit_timeout_seconds, 60), COALESCE(timeframes, '4h'),
+			created_at, updated_at
 		FROM traders
 	`)
 	if err != nil {
