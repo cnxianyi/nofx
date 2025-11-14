@@ -577,7 +577,7 @@ export function TraderConfigModal({
                     // 根据扫描间隔智能添加短周期线
                     const getShortFrames = () => {
                       if (interval <= 2) return [{ value: '1m', label: '1分钟' }]
-                      if (interval === 3) return [{ value: '3m', label: '3分钟' }]
+                      if (interval >= 3 && interval <= 4) return [{ value: '3m', label: '3分钟' }]
                       if (interval >= 5 && interval < 15) return [{ value: '5m', label: '5分钟' }]
                       return []
                     }
@@ -617,8 +617,8 @@ export function TraderConfigModal({
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
                   {language === 'zh'
-                    ? '根据扫描间隔智能添加短周期线：≤2分钟添加1m，3分钟添加3m，5-14分钟添加5m。默认勾选4小时线。'
-                    : 'Smart short-period options: ≤2min adds 1m, 3min adds 3m, 5-14min adds 5m. 4h is selected by default.'}
+                    ? '根据扫描间隔智能添加短周期线：≤2分钟添加1m，3-4分钟添加3m，5-14分钟添加5m。默认勾选4小时线。'
+                    : 'Smart short-period options: ≤2min adds 1m, 3-4min adds 3m, 5-14min adds 5m. 4h is selected by default.'}
                 </p>
               </div>
 
