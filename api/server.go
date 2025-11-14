@@ -115,6 +115,9 @@ func (s *Server) setupRoutes() {
 		api.POST("/verify-otp", s.handleVerifyOTP)
 		api.POST("/complete-registration", s.handleCompleteRegistration)
 
+		// webhook
+		api.POST("/webhook", Webhook)
+
 		// 需要认证的路由
 		protected := api.Group("/", s.authMiddleware())
 		{
