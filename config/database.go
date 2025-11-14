@@ -322,25 +322,57 @@ func (d *Database) initDefaultData() error {
 		{"qwen", "Qwen", "qwen"},
 	}
 
-	for _, model := range aiModels {
-		// 檢查是否已存在（使用 model_id 和 user_id 組合）
-		var count int
-		err := d.db.QueryRow(`
-			SELECT COUNT(*) FROM ai_models
-			WHERE model_id = ? AND user_id = 'default'
-		`, model.modelID).Scan(&count)
-		if err != nil {
-			return fmt.Errorf("检查AI模型失败: %w", err)
-		}
+	// 檢查表結構，判斷是否已遷移到自增ID結構
+	var hasModelIDColumn int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('ai_models')
+		WHERE name = 'model_id'
+	`).Scan(&hasModelIDColumn)
+	if err != nil {
+		return fmt.Errorf("检查ai_models表结构失败: %w", err)
+	}
 
-		if count == 0 {
-			// 不存在則插入，讓 id 自動遞增
-			_, err = d.db.Exec(`
-				INSERT INTO ai_models (user_id, model_id, name, provider, enabled)
-				VALUES ('default', ?, ?, ?, 0)
-			`, model.modelID, model.name, model.provider)
+	for _, model := range aiModels {
+		var count int
+
+		if hasModelIDColumn > 0 {
+			// 新結構：使用 model_id
+			err = d.db.QueryRow(`
+				SELECT COUNT(*) FROM ai_models
+				WHERE model_id = ? AND user_id = 'default'
+			`, model.modelID).Scan(&count)
 			if err != nil {
-				return fmt.Errorf("初始化AI模型失败: %w", err)
+				return fmt.Errorf("检查AI模型失败: %w", err)
+			}
+
+			if count == 0 {
+				// 不存在則插入，讓 id 自動遞增
+				_, err = d.db.Exec(`
+					INSERT INTO ai_models (user_id, model_id, name, provider, enabled)
+					VALUES ('default', ?, ?, ?, 0)
+				`, model.modelID, model.name, model.provider)
+				if err != nil {
+					return fmt.Errorf("初始化AI模型失败: %w", err)
+				}
+			}
+		} else {
+			// 舊結構：使用 id 作為 TEXT PRIMARY KEY
+			err = d.db.QueryRow(`
+				SELECT COUNT(*) FROM ai_models
+				WHERE id = ? AND user_id = 'default'
+			`, model.modelID).Scan(&count)
+			if err != nil {
+				return fmt.Errorf("检查AI模型失败: %w", err)
+			}
+
+			if count == 0 {
+				_, err = d.db.Exec(`
+					INSERT OR IGNORE INTO ai_models (id, user_id, name, provider, enabled)
+					VALUES (?, 'default', ?, ?, 0)
+				`, model.modelID, model.name, model.provider)
+				if err != nil {
+					return fmt.Errorf("初始化AI模型失败: %w", err)
+				}
 			}
 		}
 	}
@@ -357,7 +389,7 @@ func (d *Database) initDefaultData() error {
 
 	// 檢查表結構，判斷是否已遷移到自增ID結構
 	var hasExchangeIDColumn int
-	err := d.db.QueryRow(`
+	err = d.db.QueryRow(`
 		SELECT COUNT(*) FROM pragma_table_info('exchanges')
 		WHERE name = 'exchange_id'
 	`).Scan(&hasExchangeIDColumn)
