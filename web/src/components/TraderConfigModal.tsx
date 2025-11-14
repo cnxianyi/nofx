@@ -909,7 +909,7 @@ export function TraderConfigModal({
           {/* Trading Prompt */}
           <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
             <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
-              💬 交易策略提示词
+              交易策略提示词
             </h3>
             <div className="space-y-4">
               {/* 系统提示词模板选择 */}
