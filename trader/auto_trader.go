@@ -106,8 +106,8 @@ type AutoTrader struct {
 	lastResetTime         time.Time
 	stopUntil             time.Time
 	isRunning             bool
-	startTime             time.Time          // 系统启动时间
-	callCount             int                // AI调用次数
+	startTime             time.Time                        // 系统启动时间
+	callCount             int                              // AI调用次数
 	positionFirstSeenTime map[string]int64                 // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
 	lastPositions         map[string]decision.PositionInfo // 上一次周期的持仓快照 (用于检测被动平仓)
 	positionStopLoss      map[string]float64               // 持仓止损价格 (symbol_side -> stop_loss_price)
@@ -405,7 +405,7 @@ func (at *AutoTrader) runCycle() error {
 				closed.Symbol,
 				closed.Side,
 				closed.EntryPrice,
-				action.Price,    // 使用推断的平仓价格
+				action.Price, // 使用推断的平仓价格
 				pnlPct,
 				reasonCN)
 		}
@@ -1019,10 +1019,12 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 
 	// 取消旧的止损单（只删除止损单，不影响止盈单）
 	// 注意：如果存在双向持仓，这会删除两个方向的止损单
+	// ✅ 修复 Issue #998: 必须成功取消旧单才能继续，防止重复挂单
 	if err := at.trader.CancelStopLossOrders(decision.Symbol); err != nil {
-		log.Printf("  ⚠ 取消旧止损单失败: %v", err)
-		// 不中断执行，继续设置新止损
+		return fmt.Errorf("取消舊止損單失敗，中止操作以防止重複掛單 (Issue #998): %w", err)
 	}
+
+	log.Printf("  ✓ 已取消舊止損單，準備設置新止損")
 
 	// 调用交易所 API 修改止损
 	quantity := math.Abs(positionAmt)
@@ -1103,10 +1105,12 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 
 	// 取消旧的止盈单（只删除止盈单，不影响止损单）
 	// 注意：如果存在双向持仓，这会删除两个方向的止盈单
+	// ✅ 修复 Issue #998: 必须成功取消旧单才能继续，防止重复挂单
 	if err := at.trader.CancelTakeProfitOrders(decision.Symbol); err != nil {
-		log.Printf("  ⚠ 取消旧止盈单失败: %v", err)
-		// 不中断执行，继续设置新止盈
+		return fmt.Errorf("取消舊止盈單失敗，中止操作以防止重複掛單 (Issue #998): %w", err)
 	}
+
+	log.Printf("  ✓ 已取消舊止盈單，準備設置新止盈")
 
 	// 调用交易所 API 修改止盈
 	quantity := math.Abs(positionAmt)
@@ -1780,11 +1784,11 @@ func (at *AutoTrader) generateAutoCloseActions(closedPositions []decision.Positi
 			Symbol:    pos.Symbol,
 			Quantity:  pos.Quantity,
 			Leverage:  pos.Leverage,
-			Price:     closePrice,    // 推断的平仓价格（止损/止盈/强平/市价）
-			OrderID:   0,             // 自动平仓没有订单ID
-			Timestamp: time.Now(),    // 检测时间（非真实触发时间）
+			Price:     closePrice, // 推断的平仓价格（止损/止盈/强平/市价）
+			OrderID:   0,          // 自动平仓没有订单ID
+			Timestamp: time.Now(), // 检测时间（非真实触发时间）
 			Success:   true,
-			Error:     closeReason,   // 使用 Error 字段存储平仓原因（stop_loss/take_profit/liquidation/manual/unknown）
+			Error:     closeReason, // 使用 Error 字段存储平仓原因（stop_loss/take_profit/liquidation/manual/unknown）
 		})
 	}
 
