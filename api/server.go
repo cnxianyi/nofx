@@ -68,6 +68,14 @@ func NewServer(traderManager *manager.TraderManager, database *config.Database, 
 	globalLimiter := middleware.NewIPRateLimiter(rate.Limit(10), 10)
 	router.Use(middleware.RateLimitMiddleware(globalLimiter))
 
+	// 启用 CSRF 保护（Double Submit Cookie 模式）
+	csrfConfig := middleware.DefaultCSRFConfig()
+	// 生产环境应启用 HTTPS-only Cookie
+	if os.Getenv("ENVIRONMENT") == "production" {
+		csrfConfig.CookieSecure = true
+	}
+	router.Use(middleware.CSRFMiddleware(csrfConfig))
+
 	// 创建加密处理器
 	cryptoHandler := NewCryptoHandler(cryptoService)
 
@@ -143,6 +151,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/crypto/public-key", s.cryptoHandler.HandleGetPublicKey)
 		api.POST("/crypto/decrypt", s.cryptoHandler.HandleDecryptSensitiveData)
 
+		// CSRF Token 获取（无需认证）
+		api.GET("/csrf-token", s.handleGetCSRFToken)
+
 		// 系统提示词模板管理（无需认证）
 		api.GET("/prompt-templates", s.handleGetPromptTemplates)
 		api.GET("/prompt-templates/:name", s.handleGetPromptTemplate)
@@ -212,6 +223,19 @@ func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
 		"time":   c.Request.Context().Value("time"),
+	})
+}
+
+// handleGetCSRFToken 获取 CSRF Token
+// 前端调用此接口获取 CSRF Token，用于后续 POST/PUT/DELETE 请求
+func (s *Server) handleGetCSRFToken(c *gin.Context) {
+	csrfConfig := middleware.DefaultCSRFConfig()
+	token := middleware.GetCSRFToken(c, csrfConfig)
+
+	c.JSON(http.StatusOK, gin.H{
+		"csrf_token": token,
+		"header_name": csrfConfig.HeaderName,
+		"note": "Please include this token in the X-CSRF-Token header for POST/PUT/DELETE requests",
 	})
 }
 
