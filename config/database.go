@@ -53,7 +53,7 @@ type DatabaseInterface interface {
 	UseBetaCode(code, userEmail string) error
 	GetBetaCodeStats() (total, used int, err error)
 	SaveDecisionLog(userID, traderID string, record interface{}) error
-	GetDecisionLogs(userID, traderID string, limit int) ([]interface{}, error)
+	GetDecisionLogs(userID, traderID string, limit int) ([]bson.M, error)
 	Close() error
 }
 
@@ -1520,7 +1520,7 @@ func (d *Database) SaveDecisionLog(userID, traderID string, record interface{}) 
 }
 
 // GetDecisionLogs 从MongoDB获取决策日志
-func (d *Database) GetDecisionLogs(userID, traderID string, limit int) ([]interface{}, error) {
+func (d *Database) GetDecisionLogs(userID, traderID string, limit int) ([]bson.M, error) {
 	collection := d.db.Collection("decision_logs")
 	filter := bson.M{
 		"user_id":   userID,
@@ -1533,14 +1533,14 @@ func (d *Database) GetDecisionLogs(userID, traderID string, limit int) ([]interf
 	}
 	defer cursor.Close(d.ctx)
 
-	var results []interface{}
+	var results []bson.M
 	for cursor.Next(d.ctx) {
 		var doc bson.M
 		if err := cursor.Decode(&doc); err != nil {
 			continue
 		}
-		// 返回record字段
-		if record, ok := doc["record"]; ok {
+		// 返回record字段，确保类型为bson.M
+		if record, ok := doc["record"].(bson.M); ok {
 			results = append(results, record)
 		}
 	}

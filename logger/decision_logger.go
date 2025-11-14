@@ -1,66 +1,67 @@
 package logger
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"nofx/config"
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // DecisionRecord 决策记录
 type DecisionRecord struct {
-	Timestamp      time.Time          `json:"timestamp"`       // 决策时间
-	CycleNumber    int                `json:"cycle_number"`    // 周期编号
-	Exchange       string             `json:"exchange"`        // 交易所类型 (binance/hyperliquid/aster)
-	SystemPrompt   string             `json:"system_prompt"`   // 系统提示词（发送给AI的系统prompt）
-	InputPrompt    string             `json:"input_prompt"`    // 发送给AI的输入prompt
-	CoTTrace       string             `json:"cot_trace"`       // AI思维链（输出）
-	DecisionJSON   string             `json:"decision_json"`   // 决策JSON
-	AccountState   AccountSnapshot    `json:"account_state"`   // 账户状态快照
-	Positions      []PositionSnapshot `json:"positions"`       // 持仓快照
-	CandidateCoins []string           `json:"candidate_coins"` // 候选币种列表
-	Decisions      []DecisionAction   `json:"decisions"`       // 执行的决策
-	ExecutionLog   []string           `json:"execution_log"`   // 执行日志
-	Success        bool               `json:"success"`         // 是否成功
-	ErrorMessage   string             `json:"error_message"`   // 错误信息（如果有）
+	Timestamp      time.Time          `json:"timestamp" bson:"timestamp"`            // 决策时间
+	CycleNumber    int                `json:"cycle_number" bson:"cyclenumber"`       // 周期编号
+	Exchange       string             `json:"exchange" bson:"exchange"`              // 交易所类型 (binance/hyperliquid/aster)
+	SystemPrompt   string             `json:"system_prompt" bson:"systemprompt"`     // 系统提示词（发送给AI的系统prompt）
+	InputPrompt    string             `json:"input_prompt" bson:"inputprompt"`       // 发送给AI的输入prompt
+	CoTTrace       string             `json:"cot_trace" bson:"cottrace"`             // AI思维链（输出）
+	DecisionJSON   string             `json:"decision_json" bson:"decisionjson"`     // 决策JSON
+	AccountState   AccountSnapshot    `json:"account_state" bson:"accountstate"`     // 账户状态快照
+	Positions      []PositionSnapshot `json:"positions" bson:"positions"`            // 持仓快照
+	CandidateCoins []string           `json:"candidate_coins" bson:"candidatecoins"` // 候选币种列表
+	Decisions      []DecisionAction   `json:"decisions" bson:"decisions"`            // 执行的决策
+	ExecutionLog   []string           `json:"execution_log" bson:"executionlog"`     // 执行日志
+	Success        bool               `json:"success" bson:"success"`                // 是否成功
+	ErrorMessage   string             `json:"error_message" bson:"errormessage"`     // 错误信息（如果有）
 	// AIRequestDurationMs 记录 AI API 调用耗时（毫秒），方便评估调用性能
-	AIRequestDurationMs int64 `json:"ai_request_duration_ms,omitempty"`
+	AIRequestDurationMs int64 `json:"ai_request_duration_ms,omitempty" bson:"airequestdurationms,omitempty"`
 }
 
 // AccountSnapshot 账户状态快照
 type AccountSnapshot struct {
-	TotalBalance          float64 `json:"total_balance"`
-	AvailableBalance      float64 `json:"available_balance"`
-	TotalUnrealizedProfit float64 `json:"total_unrealized_profit"`
-	PositionCount         int     `json:"position_count"`
-	MarginUsedPct         float64 `json:"margin_used_pct"`
-	InitialBalance        float64 `json:"initial_balance"` // 记录当时的初始余额基准
+	TotalBalance          float64 `json:"total_balance" bson:"totalbalance"`
+	AvailableBalance      float64 `json:"available_balance" bson:"availablebalance"`
+	TotalUnrealizedProfit float64 `json:"total_unrealized_profit" bson:"totalunrealizedprofit"`
+	PositionCount         int     `json:"position_count" bson:"positioncount"`
+	MarginUsedPct         float64 `json:"margin_used_pct" bson:"marginusedpct"`
+	InitialBalance        float64 `json:"initial_balance" bson:"initialbalance"` // 记录当时的初始余额基准
 }
 
 // PositionSnapshot 持仓快照
 type PositionSnapshot struct {
-	Symbol           string  `json:"symbol"`
-	Side             string  `json:"side"`
-	PositionAmt      float64 `json:"position_amt"`
-	EntryPrice       float64 `json:"entry_price"`
-	MarkPrice        float64 `json:"mark_price"`
-	UnrealizedProfit float64 `json:"unrealized_profit"`
-	Leverage         float64 `json:"leverage"`
-	LiquidationPrice float64 `json:"liquidation_price"`
+	Symbol           string  `json:"symbol" bson:"symbol"`
+	Side             string  `json:"side" bson:"side"`
+	PositionAmt      float64 `json:"position_amt" bson:"positionamt"`
+	EntryPrice       float64 `json:"entry_price" bson:"entryprice"`
+	MarkPrice        float64 `json:"mark_price" bson:"markprice"`
+	UnrealizedProfit float64 `json:"unrealized_profit" bson:"unrealizedprofit"`
+	Leverage         float64 `json:"leverage" bson:"leverage"`
+	LiquidationPrice float64 `json:"liquidation_price" bson:"liquidationprice"`
 }
 
 // DecisionAction 决策动作
 type DecisionAction struct {
-	Action    string    `json:"action"`    // open_long, open_short, close_long, close_short, update_stop_loss, update_take_profit, partial_close
-	Symbol    string    `json:"symbol"`    // 币种
-	Quantity  float64   `json:"quantity"`  // 数量（部分平仓时使用）
-	Leverage  int       `json:"leverage"`  // 杠杆（开仓时）
-	Price     float64   `json:"price"`     // 执行价格
-	OrderID   int64     `json:"order_id"`  // 订单ID
-	Timestamp time.Time `json:"timestamp"` // 执行时间
-	Success   bool      `json:"success"`   // 是否成功
-	Error     string    `json:"error"`     // 错误信息
+	Action    string    `json:"action" bson:"action"`       // open_long, open_short, close_long, close_short, update_stop_loss, update_take_profit, partial_close
+	Symbol    string    `json:"symbol" bson:"symbol"`       // 币种
+	Quantity  float64   `json:"quantity" bson:"quantity"`   // 数量（部分平仓时使用）
+	Leverage  int       `json:"leverage" bson:"leverage"`   // 杠杆（开仓时）
+	Price     float64   `json:"price" bson:"price"`         // 执行价格
+	OrderID   int64     `json:"order_id" bson:"orderid"`    // 订单ID
+	Timestamp time.Time `json:"timestamp" bson:"timestamp"` // 执行时间
+	Success   bool      `json:"success" bson:"success"`     // 是否成功
+	Error     string    `json:"error" bson:"error"`         // 错误信息
 }
 
 // DecisionLogger 决策日志记录器
@@ -106,14 +107,16 @@ func (l *DecisionLogger) GetLatestRecords(n int) ([]*DecisionRecord, error) {
 
 	var records []*DecisionRecord
 	for _, rawRecord := range rawRecords {
-		// 将interface{}转换为bson.M，然后序列化为JSON再反序列化为DecisionRecord
-		recordBytes, err := json.Marshal(rawRecord)
+		var record DecisionRecord
+
+		// rawRecord 已经是 bson.M 类型，直接解码
+		// 使用 bson.Marshal 和 bson.Unmarshal 确保字段映射正确
+		bsonBytes, err := bson.Marshal(rawRecord)
 		if err != nil {
 			continue
 		}
-
-		var record DecisionRecord
-		if err := json.Unmarshal(recordBytes, &record); err != nil {
+		// 使用 bson.Unmarshal 解码，bson 标签会自动匹配字段
+		if err := bson.Unmarshal(bsonBytes, &record); err != nil {
 			continue
 		}
 

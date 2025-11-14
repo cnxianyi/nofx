@@ -13,6 +13,7 @@ import (
 	"nofx/crypto"
 	"nofx/decision"
 	"nofx/hook"
+	"nofx/logger"
 	"nofx/manager"
 	"nofx/trader"
 	"strconv"
@@ -1776,20 +1777,21 @@ func (s *Server) handlePositions(c *gin.Context) {
 
 // handleDecisions 决策日志列表
 func (s *Server) handleDecisions(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
+	if _, err := s.traderManager.GetTrader(traderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 获取所有历史决策记录（无限制）
-	records, err := trader.GetDecisionLogger().GetLatestRecords(10000)
+	// 使用MongoDB直接获取决策日志
+	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
+	records, err := decisionLogger.GetLatestRecords(10000)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("获取决策日志失败: %v", err),
@@ -1802,14 +1804,14 @@ func (s *Server) handleDecisions(c *gin.Context) {
 
 // handleLatestDecisions 最新决策日志（最近5条，最新的在前）
 func (s *Server) handleLatestDecisions(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
+	if _, err := s.traderManager.GetTrader(traderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
@@ -1822,7 +1824,9 @@ func (s *Server) handleLatestDecisions(c *gin.Context) {
 		}
 	}
 
-	records, err := trader.GetDecisionLogger().GetLatestRecords(limit)
+	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
+	records, err := decisionLogger.GetLatestRecords(limit)
+	log.Printf("🔍 获取决策日志: %v", records)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("获取决策日志失败: %v", err),
@@ -1841,19 +1845,20 @@ func (s *Server) handleLatestDecisions(c *gin.Context) {
 
 // handleStatistics 统计信息
 func (s *Server) handleStatistics(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
+	if _, err := s.traderManager.GetTrader(traderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	stats, err := trader.GetDecisionLogger().GetStatistics()
+	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
+	stats, err := decisionLogger.GetStatistics()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("获取统计信息失败: %v", err),
@@ -1887,21 +1892,22 @@ func (s *Server) handleCompetition(c *gin.Context) {
 
 // handleEquityHistory 收益率历史数据
 func (s *Server) handleEquityHistory(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
+	if _, err := s.traderManager.GetTrader(traderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 获取尽可能多的历史数据（几天的数据）
 	// 每3分钟一个周期：10000条 = 约20天的数据
-	records, err := trader.GetDecisionLogger().GetLatestRecords(10000)
+	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
+	records, err := decisionLogger.GetLatestRecords(10000)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("获取历史数据失败: %v", err),
@@ -1923,19 +1929,19 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 
 	// 从AutoTrader获取当前初始余额（用作旧数据的fallback）
 	base := 0.0
-	if status := trader.GetStatus(); status != nil {
-		if ib, ok := status["initial_balance"].(float64); ok && ib > 0 {
-			base = ib
-		}
+	trader, err := s.traderManager.GetTrader(traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
 	}
-
-	// 如果还是无法获取，返回错误
-	if base == 0 {
+	account, err := trader.GetAccountInfo()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "无法获取初始余额",
+			"error": fmt.Sprintf("获取账户信息失败: %v", err),
 		})
 		return
 	}
+	base = account["initial_balance"].(float64)
 
 	var history []EquityPoint
 	for _, record := range records {
@@ -1977,21 +1983,23 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 
 // handlePerformance AI历史表现分析（用于展示AI学习和反思）
 func (s *Server) handlePerformance(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
+	// trader, err := s.traderManager.GetTrader(traderID)
+	// if err != nil {
+	// 	c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	// 	return
+	// }
 
 	// 分析最近100个周期的交易表现（避免长期持仓的交易记录丢失）
 	// 假设每3分钟一个周期，100个周期 = 5小时，足够覆盖大部分交易
-	performance, err := trader.GetDecisionLogger().AnalyzePerformance(100)
+	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
+	performance, err := decisionLogger.AnalyzePerformance(100)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("分析历史表现失败: %v", err),
