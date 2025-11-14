@@ -163,7 +163,12 @@ func main() {
 	_ = godotenv.Load()
 
 	// 初始化数据库配置
-	dbPath := "config.db"
+	// MongoDB 连接字符串，例如: "mongodb://localhost:27017/nofx" 或 "mongodb://user:pass@host:port/dbname"
+	dbPath := os.Getenv("MONGO_DB_URL")
+	if dbPath == "" {
+		log.Fatalf("❌ MONGO_DB_URL 环境变量未设置")
+	}
+
 	if len(os.Args) > 1 {
 		dbPath = os.Args[1]
 	}
