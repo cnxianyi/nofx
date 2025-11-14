@@ -1157,13 +1157,36 @@ func (d *Database) UpdateUserPassword(userID, passwordHash string) error {
 
 // GetAIModels 获取用户的AI模型配置
 func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
-	rows, err := d.db.Query(`
-		SELECT id, model_id, user_id, name, provider, enabled, api_key,
-		       COALESCE(custom_api_url, '') as custom_api_url,
-		       COALESCE(custom_model_name, '') as custom_model_name,
-		       created_at, updated_at
-		FROM ai_models WHERE user_id = ? ORDER BY id
-	`, userID)
+	// 檢查表結構，判斷是否已遷移到自增ID結構
+	var hasModelIDColumn int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('ai_models')
+		WHERE name = 'model_id'
+	`).Scan(&hasModelIDColumn)
+	if err != nil {
+		return nil, fmt.Errorf("检查ai_models表结构失败: %w", err)
+	}
+
+	var rows *sql.Rows
+	if hasModelIDColumn > 0 {
+		// 新結構：有 model_id 列
+		rows, err = d.db.Query(`
+			SELECT id, model_id, user_id, name, provider, enabled, api_key,
+			       COALESCE(custom_api_url, '') as custom_api_url,
+			       COALESCE(custom_model_name, '') as custom_model_name,
+			       created_at, updated_at
+			FROM ai_models WHERE user_id = ? ORDER BY id
+		`, userID)
+	} else {
+		// 舊結構：沒有 model_id 列，id 是 TEXT PRIMARY KEY
+		rows, err = d.db.Query(`
+			SELECT id, user_id, name, provider, enabled, api_key,
+			       COALESCE(custom_api_url, '') as custom_api_url,
+			       COALESCE(custom_model_name, '') as custom_model_name,
+			       created_at, updated_at
+			FROM ai_models WHERE user_id = ? ORDER BY id
+		`, userID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1173,11 +1196,25 @@ func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
 	models := make([]*AIModelConfig, 0)
 	for rows.Next() {
 		var model AIModelConfig
-		err := rows.Scan(
-			&model.ID, &model.ModelID, &model.UserID, &model.Name, &model.Provider,
-			&model.Enabled, &model.APIKey, &model.CustomAPIURL, &model.CustomModelName,
-			&model.CreatedAt, &model.UpdatedAt,
-		)
+		if hasModelIDColumn > 0 {
+			// 新結構：掃描包含 model_id
+			err = rows.Scan(
+				&model.ID, &model.ModelID, &model.UserID, &model.Name, &model.Provider,
+				&model.Enabled, &model.APIKey, &model.CustomAPIURL, &model.CustomModelName,
+				&model.CreatedAt, &model.UpdatedAt,
+			)
+		} else {
+			// 舊結構：id 直接映射到 ModelID（因為舊結構中 id 是業務邏輯 ID）
+			var idValue string
+			err = rows.Scan(
+				&idValue, &model.UserID, &model.Name, &model.Provider,
+				&model.Enabled, &model.APIKey, &model.CustomAPIURL, &model.CustomModelName,
+				&model.CreatedAt, &model.UpdatedAt,
+			)
+			// 舊結構中 id 是文本，直接用作業務邏輯 ID
+			model.ID = 0 // 舊結構沒有整數 ID
+			model.ModelID = idValue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1275,15 +1312,40 @@ func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, custom
 
 // GetExchanges 获取用户的交易所配置
 func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
-	rows, err := d.db.Query(`
-		SELECT id, exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet,
-		       COALESCE(hyperliquid_wallet_addr, '') as hyperliquid_wallet_addr,
-		       COALESCE(aster_user, '') as aster_user,
-		       COALESCE(aster_signer, '') as aster_signer,
-		       COALESCE(aster_private_key, '') as aster_private_key,
-		       created_at, updated_at
-		FROM exchanges WHERE user_id = ? ORDER BY id
-	`, userID)
+	// 檢查表結構，判斷是否已遷移到自增ID結構
+	var hasExchangeIDColumn int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('exchanges')
+		WHERE name = 'exchange_id'
+	`).Scan(&hasExchangeIDColumn)
+	if err != nil {
+		return nil, fmt.Errorf("检查exchanges表结构失败: %w", err)
+	}
+
+	var rows *sql.Rows
+	if hasExchangeIDColumn > 0 {
+		// 新結構：有 exchange_id 列
+		rows, err = d.db.Query(`
+			SELECT id, exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet,
+			       COALESCE(hyperliquid_wallet_addr, '') as hyperliquid_wallet_addr,
+			       COALESCE(aster_user, '') as aster_user,
+			       COALESCE(aster_signer, '') as aster_signer,
+			       COALESCE(aster_private_key, '') as aster_private_key,
+			       created_at, updated_at
+			FROM exchanges WHERE user_id = ? ORDER BY id
+		`, userID)
+	} else {
+		// 舊結構：沒有 exchange_id 列，id 是 TEXT PRIMARY KEY
+		rows, err = d.db.Query(`
+			SELECT id, user_id, name, type, enabled, api_key, secret_key, testnet,
+			       COALESCE(hyperliquid_wallet_addr, '') as hyperliquid_wallet_addr,
+			       COALESCE(aster_user, '') as aster_user,
+			       COALESCE(aster_signer, '') as aster_signer,
+			       COALESCE(aster_private_key, '') as aster_private_key,
+			       created_at, updated_at
+			FROM exchanges WHERE user_id = ? ORDER BY id
+		`, userID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1293,13 +1355,29 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 	exchanges := make([]*ExchangeConfig, 0)
 	for rows.Next() {
 		var exchange ExchangeConfig
-		err := rows.Scan(
-			&exchange.ID, &exchange.ExchangeID, &exchange.UserID, &exchange.Name, &exchange.Type,
-			&exchange.Enabled, &exchange.APIKey, &exchange.SecretKey, &exchange.Testnet,
-			&exchange.HyperliquidWalletAddr, &exchange.AsterUser,
-			&exchange.AsterSigner, &exchange.AsterPrivateKey,
-			&exchange.CreatedAt, &exchange.UpdatedAt,
-		)
+		if hasExchangeIDColumn > 0 {
+			// 新結構：掃描包含 exchange_id
+			err = rows.Scan(
+				&exchange.ID, &exchange.ExchangeID, &exchange.UserID, &exchange.Name, &exchange.Type,
+				&exchange.Enabled, &exchange.APIKey, &exchange.SecretKey, &exchange.Testnet,
+				&exchange.HyperliquidWalletAddr, &exchange.AsterUser,
+				&exchange.AsterSigner, &exchange.AsterPrivateKey,
+				&exchange.CreatedAt, &exchange.UpdatedAt,
+			)
+		} else {
+			// 舊結構：id 直接映射到 ExchangeID（因為舊結構中 id 是業務邏輯 ID）
+			var idValue string
+			err = rows.Scan(
+				&idValue, &exchange.UserID, &exchange.Name, &exchange.Type,
+				&exchange.Enabled, &exchange.APIKey, &exchange.SecretKey, &exchange.Testnet,
+				&exchange.HyperliquidWalletAddr, &exchange.AsterUser,
+				&exchange.AsterSigner, &exchange.AsterPrivateKey,
+				&exchange.CreatedAt, &exchange.UpdatedAt,
+			)
+			// 舊結構中 id 是文本，直接用作業務邏輯 ID
+			exchange.ID = 0 // 舊結構沒有整數 ID
+			exchange.ExchangeID = idValue
+		}
 		if err != nil {
 			return nil, err
 		}
