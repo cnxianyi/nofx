@@ -37,9 +37,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
         onLanguageChange={setLanguage}
         user={user}
         onLogout={logout}
-        onPageChange={() => {
-          // React Router handles navigation now
-        }}
       />
 
       {/* Main Content */}
