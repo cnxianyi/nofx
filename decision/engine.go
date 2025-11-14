@@ -41,9 +41,21 @@ type PositionInfo struct {
 	PeakPnLPct       float64 `json:"peak_pnl_pct"` // 历史最高收益率（百分比）
 	LiquidationPrice float64 `json:"liquidation_price"`
 	MarginUsed       float64 `json:"margin_used"`
-	UpdateTime       int64   `json:"update_time"` // 持仓更新时间戳（毫秒）
-	StopLoss         float64 `json:"stop_loss,omitempty"`         // 止损价格（用于推断平仓原因）
-	TakeProfit       float64 `json:"take_profit,omitempty"`       // 止盈价格（用于推断平仓原因）
+	UpdateTime       int64   `json:"update_time"`           // 持仓更新时间戳（毫秒）
+	StopLoss         float64 `json:"stop_loss,omitempty"`   // 止损价格（用于推断平仓原因）
+	TakeProfit       float64 `json:"take_profit,omitempty"` // 止盈价格（用于推断平仓原因）
+}
+
+// OpenOrderInfo 未成交订单信息（用于 AI 决策时了解当前挂单状态）
+type OpenOrderInfo struct {
+	Symbol       string  `json:"symbol"`        // 交易对
+	OrderID      int64   `json:"order_id"`      // 订单ID
+	Type         string  `json:"type"`          // 订单类型: STOP_MARKET, TAKE_PROFIT_MARKET, LIMIT, MARKET
+	Side         string  `json:"side"`          // 订单方向: BUY, SELL
+	PositionSide string  `json:"position_side"` // 持仓方向: LONG, SHORT, BOTH
+	Quantity     float64 `json:"quantity"`      // 订单数量
+	Price        float64 `json:"price"`         // 限价订单价格（限价单）
+	StopPrice    float64 `json:"stop_price"`    // 触发价格（止损/止盈单）
 }
 
 // AccountInfo 账户信息
@@ -81,6 +93,7 @@ type Context struct {
 	CallCount       int                     `json:"call_count"`
 	Account         AccountInfo             `json:"account"`
 	Positions       []PositionInfo          `json:"positions"`
+	OpenOrders      []OpenOrderInfo         `json:"open_orders"` // 未成交订单列表（用于 AI 了解挂单状态）
 	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
 	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
 	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
@@ -388,6 +401,16 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
 	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
 	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+	sb.WriteString("## 🛡️ 未成交挂单提醒\n\n")
+	sb.WriteString("在「当前持仓」部分，你会看到每个持仓的挂单状态：\n\n")
+	sb.WriteString("- 🛡️ **止损单**: 表示该持仓已有止损保护\n")
+	sb.WriteString("- 🎯 **止盈单**: 表示该持仓已设置止盈目标\n")
+	sb.WriteString("- ⚠️ **该持仓没有止损保护！**: 表示该持仓缺少止损单，需要立即设置\n\n")
+	sb.WriteString("**重要**: \n")
+	sb.WriteString("- ✅ 如果看到 🛡️ 止损单已存在，且你想调整止损价格，仍可使用 `update_stop_loss` 动作（系统会自动取消旧单并设置新单）\n")
+	sb.WriteString("- ⚠️ 如果看到 🛡️ 止损单已存在，且当前止损价格合理，**不要重复发送相同的 update_stop_loss 指令**\n")
+	sb.WriteString("- 🚨 如果看到 ⚠️ **该持仓没有止损保护！**，必须立即使用 `update_stop_loss` 设置止损，否则风险极高\n")
+	sb.WriteString("- 同样规则适用于 `update_take_profit` 和 🎯 止盈单\n\n")
 
 	return sb.String()
 }
@@ -437,10 +460,32 @@ func buildUserPrompt(ctx *Context) string {
 			// 计算仓位价值（用于 partial_close 检查）
 			positionValue := math.Abs(pos.Quantity) * pos.MarkPrice
 
-			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 数量%.4f | 仓位价值%.2f USDT | 盈亏%+.2f%% | 盈亏金额%+.2f USDT | 最高收益率%.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n\n",
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 数量%.4f | 仓位价值%.2f USDT | 盈亏%+.2f%% | 盈亏金额%+.2f USDT | 最高收益率%.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n",
 				i+1, pos.Symbol, strings.ToUpper(pos.Side),
 				pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
 				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
+
+			// 显示该持仓的止损/止盈挂单状态（用于 AI 了解已有挂单，避免重复下单）
+			hasStopLoss := false
+
+			for _, order := range ctx.OpenOrders {
+				if order.Symbol != pos.Symbol {
+					continue
+				}
+
+				if order.Type == "STOP_MARKET" || order.Type == "STOP" {
+					sb.WriteString(fmt.Sprintf("   🛡️ 止损单: %.4f (%s)\n", order.StopPrice, order.Side))
+					hasStopLoss = true
+				} else if order.Type == "TAKE_PROFIT_MARKET" || order.Type == "TAKE_PROFIT" {
+					sb.WriteString(fmt.Sprintf("   🎯 止盈单: %.4f (%s)\n", order.StopPrice, order.Side))
+				}
+			}
+
+			if !hasStopLoss {
+				sb.WriteString("   ⚠️ **该持仓没有止损保护！**\n")
+			}
+
+			sb.WriteString("\n")
 
 			// 使用FormatMarketData输出完整市场数据
 			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
