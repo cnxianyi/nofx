@@ -684,8 +684,10 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 
 	// 设置扫描间隔默认值
 	scanIntervalMinutes := req.ScanIntervalMinutes
-	if scanIntervalMinutes < 3 {
-		scanIntervalMinutes = 3 // 默认3分钟，且不允许小于3
+	if scanIntervalMinutes <= 0 {
+		scanIntervalMinutes = 2 // 默认2分钟
+	} else if scanIntervalMinutes < 1 {
+		scanIntervalMinutes = 1 // 最低1分钟，不允许小于1分钟
 	}
 
 	// ✅ Fix #787, #807, #790: Respect user-specified initial balance
@@ -968,8 +970,8 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	scanIntervalMinutes := req.ScanIntervalMinutes
 	if scanIntervalMinutes <= 0 {
 		scanIntervalMinutes = existingTrader.ScanIntervalMinutes // 保持原值
-	} else if scanIntervalMinutes < 3 {
-		scanIntervalMinutes = 3
+	} else if scanIntervalMinutes < 1 {
+		scanIntervalMinutes = 1 // 最低1分钟，不允许小于1分钟
 	}
 
 	// 设置提示词模板，允许更新

@@ -80,7 +80,7 @@ export function TraderConfigModal({
     use_coin_pool: false,
     use_oi_top: false,
     initial_balance: 100,
-    scan_interval_minutes: 3,
+    scan_interval_minutes: 2,      // 默认 2 分钟（平衡延遲與成本）
     taker_fee_rate: 0.0004,        // 默认 Binance Taker 费率 (0.04%)
     maker_fee_rate: 0.0002,        // 默认 Binance Maker 费率 (0.02%)
     timeframes: '4h',              // 默认只勾选 4 小时线
@@ -128,7 +128,7 @@ export function TraderConfigModal({
         use_coin_pool: false,
         use_oi_top: false,
         initial_balance: 100,
-        scan_interval_minutes: 3,
+        scan_interval_minutes: 2, // 默认 2 分钟（平衡延遲與成本）
         taker_fee_rate: 0.0004, // 默认 Binance Taker 费率 (0.04%)
         maker_fee_rate: 0.0002, // 默认 Binance Maker 费率 (0.02%)
         timeframes: '4h',       // 默认只勾选 4 小时线
