@@ -418,3 +418,199 @@ func TestGetBrOrderID(t *testing.T) {
 		ids[id] = true
 	}
 }
+
+// ============================================================
+// 四、缓存管理测试
+// ============================================================
+
+// TestInvalidateBalanceCache 测试清除余额缓存
+func TestInvalidateBalanceCache(t *testing.T) {
+	suite := NewBinanceFuturesTestSuite(t)
+	defer suite.Cleanup()
+
+	trader := suite.Trader.(*FuturesTrader)
+	trader.cacheDuration = 1 * time.Hour // 启用长时间缓存以便测试
+
+	// 1. 第一次调用 GetBalance 填充缓存
+	balance1, err := trader.GetBalance()
+	assert.NoError(t, err)
+	assert.NotNil(t, balance1)
+
+	// 验证缓存已被填充
+	assert.NotNil(t, trader.cachedBalance, "缓存应该被填充")
+	assert.False(t, trader.balanceCacheTime.IsZero(), "缓存时间应该被设置")
+
+	// 2. 清除缓存
+	trader.InvalidateBalanceCache()
+
+	// 3. 验证缓存已被清除
+	assert.Nil(t, trader.cachedBalance, "缓存应该被清除")
+	assert.True(t, trader.balanceCacheTime.IsZero(), "缓存时间应该被重置为零值")
+
+	// 4. 再次调用 GetBalance 应该重新从 API 获取（而非缓存）
+	balance2, err := trader.GetBalance()
+	assert.NoError(t, err)
+	assert.NotNil(t, balance2)
+	assert.NotNil(t, trader.cachedBalance, "缓存应该重新填充")
+}
+
+// TestInvalidatePositionsCache 测试清除持仓缓存
+func TestInvalidatePositionsCache(t *testing.T) {
+	suite := NewBinanceFuturesTestSuite(t)
+	defer suite.Cleanup()
+
+	trader := suite.Trader.(*FuturesTrader)
+	trader.cacheDuration = 1 * time.Hour // 启用长时间缓存以便测试
+
+	// 1. 第一次调用 GetPositions 填充缓存
+	positions1, err := trader.GetPositions()
+	assert.NoError(t, err)
+	assert.NotNil(t, positions1)
+
+	// 验证缓存已被填充
+	assert.NotNil(t, trader.cachedPositions, "缓存应该被填充")
+	assert.False(t, trader.positionsCacheTime.IsZero(), "缓存时间应该被设置")
+
+	// 2. 清除缓存
+	trader.InvalidatePositionsCache()
+
+	// 3. 验证缓存已被清除
+	assert.Nil(t, trader.cachedPositions, "缓存应该被清除")
+	assert.True(t, trader.positionsCacheTime.IsZero(), "缓存时间应该被重置为零值")
+
+	// 4. 再次调用 GetPositions 应该重新从 API 获取（而非缓存）
+	positions2, err := trader.GetPositions()
+	assert.NoError(t, err)
+	assert.NotNil(t, positions2)
+	assert.NotNil(t, trader.cachedPositions, "缓存应该重新填充")
+}
+
+// TestInvalidateAllCaches 测试清除所有缓存
+func TestInvalidateAllCaches(t *testing.T) {
+	suite := NewBinanceFuturesTestSuite(t)
+	defer suite.Cleanup()
+
+	trader := suite.Trader.(*FuturesTrader)
+	trader.cacheDuration = 1 * time.Hour // 启用长时间缓存以便测试
+
+	// 1. 填充所有缓存
+	_, err := trader.GetBalance()
+	assert.NoError(t, err)
+	_, err = trader.GetPositions()
+	assert.NoError(t, err)
+
+	// 验证两个缓存都被填充
+	assert.NotNil(t, trader.cachedBalance, "余额缓存应该被填充")
+	assert.NotNil(t, trader.cachedPositions, "持仓缓存应该被填充")
+
+	// 2. 清除所有缓存
+	trader.InvalidateAllCaches()
+
+	// 3. 验证所有缓存都被清除
+	assert.Nil(t, trader.cachedBalance, "余额缓存应该被清除")
+	assert.True(t, trader.balanceCacheTime.IsZero(), "余额缓存时间应该被重置")
+	assert.Nil(t, trader.cachedPositions, "持仓缓存应该被清除")
+	assert.True(t, trader.positionsCacheTime.IsZero(), "持仓缓存时间应该被重置")
+}
+
+// TestTradeOperationsInvalidateCache 测试交易操作自动清除缓存
+func TestTradeOperationsInvalidateCache(t *testing.T) {
+	suite := NewBinanceFuturesTestSuite(t)
+	defer suite.Cleanup()
+
+	trader := suite.Trader.(*FuturesTrader)
+	trader.cacheDuration = 1 * time.Hour // 启用长时间缓存以便测试
+
+	// 子测试1：OpenLong 后缓存被清除
+	t.Run("OpenLong_invalidates_cache", func(t *testing.T) {
+		// 填充缓存
+		_, _ = trader.GetBalance()
+		_, _ = trader.GetPositions()
+		assert.NotNil(t, trader.cachedBalance, "开仓前余额缓存应该存在")
+		assert.NotNil(t, trader.cachedPositions, "开仓前持仓缓存应该存在")
+
+		// 执行开多仓
+		_, err := trader.OpenLong("BTCUSDT", 0.01, 10)
+		assert.NoError(t, err)
+
+		// 验证缓存被清除
+		assert.Nil(t, trader.cachedBalance, "开多仓后余额缓存应该被清除")
+		assert.Nil(t, trader.cachedPositions, "开多仓后持仓缓存应该被清除")
+	})
+
+	// 子测试2：OpenShort 后缓存被清除
+	t.Run("OpenShort_invalidates_cache", func(t *testing.T) {
+		// 重新填充缓存
+		_, _ = trader.GetBalance()
+		_, _ = trader.GetPositions()
+		assert.NotNil(t, trader.cachedBalance)
+		assert.NotNil(t, trader.cachedPositions)
+
+		// 执行开空仓
+		_, err := trader.OpenShort("ETHUSDT", 0.004, 5)
+		assert.NoError(t, err)
+
+		// 验证缓存被清除
+		assert.Nil(t, trader.cachedBalance, "开空仓后余额缓存应该被清除")
+		assert.Nil(t, trader.cachedPositions, "开空仓后持仓缓存应该被清除")
+	})
+
+	// 子测试3：CloseLong 后缓存被清除
+	t.Run("CloseLong_invalidates_cache", func(t *testing.T) {
+		// 重新填充缓存
+		_, _ = trader.GetBalance()
+		_, _ = trader.GetPositions()
+		assert.NotNil(t, trader.cachedBalance)
+
+		// 执行平多仓
+		_, err := trader.CloseLong("BTCUSDT", 0.01)
+		assert.NoError(t, err)
+
+		// 验证缓存被清除
+		assert.Nil(t, trader.cachedBalance, "平多仓后余额缓存应该被清除")
+		assert.Nil(t, trader.cachedPositions, "平多仓后持仓缓存应该被清除")
+	})
+
+	// 子测试4：CloseShort 后缓存被清除
+	t.Run("CloseShort_invalidates_cache", func(t *testing.T) {
+		// 重新填充缓存
+		_, _ = trader.GetBalance()
+		_, _ = trader.GetPositions()
+
+		// 执行平空仓
+		_, err := trader.CloseShort("ETHUSDT", 0.004)
+		assert.NoError(t, err)
+
+		// 验证缓存被清除
+		assert.Nil(t, trader.cachedBalance, "平空仓后余额缓存应该被清除")
+		assert.Nil(t, trader.cachedPositions, "平空仓后持仓缓存应该被清除")
+	})
+
+	// 子测试5：SetStopLoss 后持仓缓存被清除
+	t.Run("SetStopLoss_invalidates_positions_cache", func(t *testing.T) {
+		// 重新填充缓存
+		_, _ = trader.GetPositions()
+		assert.NotNil(t, trader.cachedPositions)
+
+		// 设置止损
+		err := trader.SetStopLoss("BTCUSDT", "LONG", 0.01, 45000.0)
+		assert.NoError(t, err)
+
+		// 验证持仓缓存被清除（止损单会影响持仓信息）
+		assert.Nil(t, trader.cachedPositions, "设置止损后持仓缓存应该被清除")
+	})
+
+	// 子测试6：SetTakeProfit 后持仓缓存被清除
+	t.Run("SetTakeProfit_invalidates_positions_cache", func(t *testing.T) {
+		// 重新填充缓存
+		_, _ = trader.GetPositions()
+		assert.NotNil(t, trader.cachedPositions)
+
+		// 设置止盈
+		err := trader.SetTakeProfit("BTCUSDT", "LONG", 0.01, 55000.0)
+		assert.NoError(t, err)
+
+		// 验证持仓缓存被清除
+		assert.Nil(t, trader.cachedPositions, "设置止盈后持仓缓存应该被清除")
+	})
+}
