@@ -52,6 +52,8 @@ type DatabaseInterface interface {
 	ValidateBetaCode(code string) (bool, error)
 	UseBetaCode(code, userEmail string) error
 	GetBetaCodeStats() (total, used int, err error)
+	SaveDecisionLog(userID, traderID string, record interface{}) error
+	GetDecisionLogs(userID, traderID string, limit int) ([]interface{}, error)
 	Close() error
 }
 
@@ -1502,4 +1504,51 @@ func (d *Database) decryptSensitiveData(encrypted string) string {
 func (d *Database) cleanupLegacyColumns() error {
 	// MongoDB 不需要清理遗留列，直接返回
 	return nil
+}
+
+// SaveDecisionLog 保存决策日志到MongoDB
+func (d *Database) SaveDecisionLog(userID, traderID string, record interface{}) error {
+	collection := d.db.Collection("decision_logs")
+	doc := bson.M{
+		"user_id":    userID,
+		"trader_id":  traderID,
+		"record":     record,
+		"created_at": time.Now(),
+	}
+	_, err := collection.InsertOne(d.ctx, doc)
+	return err
+}
+
+// GetDecisionLogs 从MongoDB获取决策日志
+func (d *Database) GetDecisionLogs(userID, traderID string, limit int) ([]interface{}, error) {
+	collection := d.db.Collection("decision_logs")
+	filter := bson.M{
+		"user_id":   userID,
+		"trader_id": traderID,
+	}
+	opts := options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(int64(limit))
+	cursor, err := collection.Find(d.ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(d.ctx)
+
+	var results []interface{}
+	for cursor.Next(d.ctx) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		// 返回record字段
+		if record, ok := doc["record"]; ok {
+			results = append(results, record)
+		}
+	}
+
+	// 反转数组，让时间从旧到新排列
+	for i, j := 0, len(results)-1; i < j; i, j = i+1, j-1 {
+		results[i], results[j] = results[j], results[i]
+	}
+
+	return results, nil
 }

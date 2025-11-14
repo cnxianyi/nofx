@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	dbconfig "nofx/config"
 	"nofx/decision"
 	"nofx/logger"
 	"nofx/market"
@@ -106,8 +107,8 @@ type AutoTrader struct {
 	lastResetTime         time.Time
 	stopUntil             time.Time
 	isRunning             bool
-	startTime             time.Time          // 系统启动时间
-	callCount             int                // AI调用次数
+	startTime             time.Time                        // 系统启动时间
+	callCount             int                              // AI调用次数
 	positionFirstSeenTime map[string]int64                 // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
 	lastPositions         map[string]decision.PositionInfo // 上一次周期的持仓快照 (用于检测被动平仓)
 	positionStopLoss      map[string]float64               // 持仓止损价格 (symbol_side -> stop_loss_price)
@@ -216,9 +217,12 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 		return nil, fmt.Errorf("初始金额必须大于0，请在配置中设置InitialBalance")
 	}
 
-	// 初始化决策日志记录器（使用trader ID创建独立目录）
-	logDir := fmt.Sprintf("decision_logs/%s", config.ID)
-	decisionLogger := logger.NewDecisionLogger(logDir)
+	// 初始化决策日志记录器（使用MongoDB存储）
+	dbInterface, ok := database.(dbconfig.DatabaseInterface)
+	if !ok {
+		return nil, fmt.Errorf("database参数不是DatabaseInterface类型")
+	}
+	decisionLogger := logger.NewDecisionLogger(dbInterface, userID, config.ID)
 
 	// 设置默认系统提示词模板
 	systemPromptTemplate := config.SystemPromptTemplate
@@ -403,7 +407,7 @@ func (at *AutoTrader) runCycle() error {
 				closed.Symbol,
 				closed.Side,
 				closed.EntryPrice,
-				action.Price,    // 使用推断的平仓价格
+				action.Price, // 使用推断的平仓价格
 				pnlPct,
 				reasonCN)
 		}
@@ -1778,11 +1782,11 @@ func (at *AutoTrader) generateAutoCloseActions(closedPositions []decision.Positi
 			Symbol:    pos.Symbol,
 			Quantity:  pos.Quantity,
 			Leverage:  pos.Leverage,
-			Price:     closePrice,    // 推断的平仓价格（止损/止盈/强平/市价）
-			OrderID:   0,             // 自动平仓没有订单ID
-			Timestamp: time.Now(),    // 检测时间（非真实触发时间）
+			Price:     closePrice, // 推断的平仓价格（止损/止盈/强平/市价）
+			OrderID:   0,          // 自动平仓没有订单ID
+			Timestamp: time.Now(), // 检测时间（非真实触发时间）
 			Success:   true,
-			Error:     closeReason,   // 使用 Error 字段存储平仓原因（stop_loss/take_profit/liquidation/manual/unknown）
+			Error:     closeReason, // 使用 Error 字段存储平仓原因（stop_loss/take_profit/liquidation/manual/unknown）
 		})
 	}
 

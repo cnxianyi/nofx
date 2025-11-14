@@ -3,10 +3,8 @@ package logger
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
-	"os"
-	"path/filepath"
+	"nofx/config"
 	"time"
 )
 
@@ -67,94 +65,59 @@ type DecisionAction struct {
 
 // DecisionLogger 决策日志记录器
 type DecisionLogger struct {
-	logDir      string
+	database    config.DatabaseInterface
+	userID      string
+	traderID    string
 	cycleNumber int
 }
 
-// NewDecisionLogger 创建决策日志记录器
-func NewDecisionLogger(logDir string) *DecisionLogger {
-	if logDir == "" {
-		logDir = "decision_logs"
-	}
-
-	// 确保日志目录存在（使用安全权限：只有所有者可访问）
-	if err := os.MkdirAll(logDir, 0700); err != nil {
-		fmt.Printf("⚠ 创建日志目录失败: %v\n", err)
-	}
-
-	// 强制设置目录权限（即使目录已存在）- 确保安全
-	if err := os.Chmod(logDir, 0700); err != nil {
-		fmt.Printf("⚠ 设置日志目录权限失败: %v\n", err)
-	}
-
+// NewDecisionLogger 创建决策日志记录器（使用MongoDB存储）
+func NewDecisionLogger(database config.DatabaseInterface, userID, traderID string) *DecisionLogger {
 	return &DecisionLogger{
-		logDir:      logDir,
+		database:    database,
+		userID:      userID,
+		traderID:    traderID,
 		cycleNumber: 0,
 	}
 }
 
-// LogDecision 记录决策
+// LogDecision 记录决策到MongoDB
 func (l *DecisionLogger) LogDecision(record *DecisionRecord) error {
 	l.cycleNumber++
 	record.CycleNumber = l.cycleNumber
 	record.Timestamp = time.Now()
 
-	// 生成文件名：decision_YYYYMMDD_HHMMSS_cycleN.json
-	filename := fmt.Sprintf("decision_%s_cycle%d.json",
-		record.Timestamp.Format("20060102_150405"),
-		record.CycleNumber)
-
-	filepath := filepath.Join(l.logDir, filename)
-
-	// 序列化为JSON（带缩进，方便阅读）
-	data, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化决策记录失败: %w", err)
+	// 保存到MongoDB
+	if err := l.database.SaveDecisionLog(l.userID, l.traderID, record); err != nil {
+		return fmt.Errorf("保存决策记录到数据库失败: %w", err)
 	}
 
-	// 写入文件（使用安全权限：只有所有者可读写）
-	if err := ioutil.WriteFile(filepath, data, 0600); err != nil {
-		return fmt.Errorf("写入决策记录失败: %w", err)
-	}
-
-	fmt.Printf("📝 决策记录已保存: %s\n", filename)
+	fmt.Printf("📝 决策记录已保存到数据库: cycle %d\n", record.CycleNumber)
 	return nil
 }
 
 // GetLatestRecords 获取最近N条记录（按时间正序：从旧到新）
 func (l *DecisionLogger) GetLatestRecords(n int) ([]*DecisionRecord, error) {
-	files, err := ioutil.ReadDir(l.logDir)
+	// 从MongoDB获取记录
+	rawRecords, err := l.database.GetDecisionLogs(l.userID, l.traderID, n)
 	if err != nil {
-		return nil, fmt.Errorf("读取日志目录失败: %w", err)
+		return nil, fmt.Errorf("从数据库读取日志失败: %w", err)
 	}
 
-	// 先按修改时间倒序收集（最新的在前）
 	var records []*DecisionRecord
-	count := 0
-	for i := len(files) - 1; i >= 0 && count < n; i-- {
-		file := files[i]
-		if file.IsDir() {
-			continue
-		}
-
-		filepath := filepath.Join(l.logDir, file.Name())
-		data, err := ioutil.ReadFile(filepath)
+	for _, rawRecord := range rawRecords {
+		// 将interface{}转换为bson.M，然后序列化为JSON再反序列化为DecisionRecord
+		recordBytes, err := json.Marshal(rawRecord)
 		if err != nil {
 			continue
 		}
 
 		var record DecisionRecord
-		if err := json.Unmarshal(data, &record); err != nil {
+		if err := json.Unmarshal(recordBytes, &record); err != nil {
 			continue
 		}
 
 		records = append(records, &record)
-		count++
-	}
-
-	// 反转数组，让时间从旧到新排列（用于图表显示）
-	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
-		records[i], records[j] = records[j], records[i]
 	}
 
 	return records, nil
@@ -162,89 +125,44 @@ func (l *DecisionLogger) GetLatestRecords(n int) ([]*DecisionRecord, error) {
 
 // GetRecordByDate 获取指定日期的所有记录
 func (l *DecisionLogger) GetRecordByDate(date time.Time) ([]*DecisionRecord, error) {
-	dateStr := date.Format("20060102")
-	pattern := filepath.Join(l.logDir, fmt.Sprintf("decision_%s_*.json", dateStr))
-
-	files, err := filepath.Glob(pattern)
+	// 从MongoDB获取所有记录，然后按日期过滤
+	// 使用较大的limit值获取足够多的记录
+	allRecords, err := l.GetLatestRecords(10000) // 获取足够多的记录
 	if err != nil {
-		return nil, fmt.Errorf("查找日志文件失败: %w", err)
+		return nil, err
 	}
 
+	// 过滤指定日期的记录
+	dateStr := date.Format("2006-01-02")
 	var records []*DecisionRecord
-	for _, filepath := range files {
-		data, err := ioutil.ReadFile(filepath)
-		if err != nil {
-			continue
+	for _, record := range allRecords {
+		if record.Timestamp.Format("2006-01-02") == dateStr {
+			records = append(records, record)
 		}
-
-		var record DecisionRecord
-		if err := json.Unmarshal(data, &record); err != nil {
-			continue
-		}
-
-		records = append(records, &record)
 	}
 
 	return records, nil
 }
 
-// CleanOldRecords 清理N天前的旧记录
+// CleanOldRecords 清理N天前的旧记录（MongoDB版本，暂不实现自动清理）
 func (l *DecisionLogger) CleanOldRecords(days int) error {
-	cutoffTime := time.Now().AddDate(0, 0, -days)
-
-	files, err := ioutil.ReadDir(l.logDir)
-	if err != nil {
-		return fmt.Errorf("读取日志目录失败: %w", err)
-	}
-
-	removedCount := 0
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		if file.ModTime().Before(cutoffTime) {
-			filepath := filepath.Join(l.logDir, file.Name())
-			if err := os.Remove(filepath); err != nil {
-				fmt.Printf("⚠ 删除旧记录失败 %s: %v\n", file.Name(), err)
-				continue
-			}
-			removedCount++
-		}
-	}
-
-	if removedCount > 0 {
-		fmt.Printf("🗑️ 已清理 %d 条旧记录（%d天前）\n", removedCount, days)
-	}
-
+	// MongoDB版本：可以通过TTL索引自动清理，这里暂时不实现
+	// 如果需要清理，可以在MongoDB中设置TTL索引
+	fmt.Printf("ℹ️ MongoDB版本暂不支持自动清理旧记录，建议使用MongoDB的TTL索引功能\n")
 	return nil
 }
 
 // GetStatistics 获取统计信息
 func (l *DecisionLogger) GetStatistics() (*Statistics, error) {
-	files, err := ioutil.ReadDir(l.logDir)
+	// 从MongoDB获取所有记录进行统计
+	allRecords, err := l.GetLatestRecords(10000) // 获取足够多的记录
 	if err != nil {
-		return nil, fmt.Errorf("读取日志目录失败: %w", err)
+		return nil, fmt.Errorf("从数据库读取日志失败: %w", err)
 	}
 
 	stats := &Statistics{}
 
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		filepath := filepath.Join(l.logDir, file.Name())
-		data, err := ioutil.ReadFile(filepath)
-		if err != nil {
-			continue
-		}
-
-		var record DecisionRecord
-		if err := json.Unmarshal(data, &record); err != nil {
-			continue
-		}
-
+	for _, record := range allRecords {
 		stats.TotalCycles++
 
 		for _, action := range record.Decisions {
@@ -494,7 +412,7 @@ func (l *DecisionLogger) AnalyzePerformance(lookbackCycles int) (*PerformanceAna
 					// ⚠️ 扣除交易手续费（开仓 + 平仓各一次）
 					// 获取交易所费率（从record中获取，如果没有则使用默认值）
 					feeRate := getTakerFeeRate(record.Exchange)
-					openFee := actualQuantity * openPrice * feeRate   // 开仓手续费
+					openFee := actualQuantity * openPrice * feeRate     // 开仓手续费
 					closeFee := actualQuantity * action.Price * feeRate // 平仓手续费
 					totalFees := openFee + closeFee
 					pnl -= totalFees // 从盈亏中扣除手续费
