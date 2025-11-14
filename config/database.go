@@ -1228,86 +1228,124 @@ func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
 
 // UpdateAIModel 更新AI模型配置，如果不存在则创建用户特定配置
 func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customModelName string) error {
-	// 先尝试精确匹配 model_id（新版逻辑，支持多个相同 provider 的模型）
-	var existingModelID string
+	// 檢查表結構，判斷是否已遷移到自增ID結構
+	var hasModelIDColumn int
 	err := d.db.QueryRow(`
-		SELECT model_id FROM ai_models WHERE user_id = ? AND model_id = ? LIMIT 1
-	`, userID, id).Scan(&existingModelID)
-
-	if err == nil {
-		// 找到了现有配置（精确匹配 model_id），更新它
-		encryptedAPIKey := d.encryptSensitiveData(apiKey)
-		_, err = d.db.Exec(`
-			UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
-			WHERE model_id = ? AND user_id = ?
-		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
-		return err
-	}
-
-	// model_id 不存在，尝试兼容旧逻辑：将 id 作为 provider 查找
-	provider := id
-	err = d.db.QueryRow(`
-		SELECT model_id FROM ai_models WHERE user_id = ? AND provider = ? LIMIT 1
-	`, userID, provider).Scan(&existingModelID)
-
-	if err == nil {
-		// 找到了现有配置（通过 provider 匹配，兼容旧版），更新它
-		log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, existingModelID)
-		encryptedAPIKey := d.encryptSensitiveData(apiKey)
-		_, err = d.db.Exec(`
-			UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
-			WHERE model_id = ? AND user_id = ?
-		`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
-		return err
-	}
-
-	// 没有找到任何现有配置，创建新的
-	// 推断 provider（从 id 中提取，或者直接使用 id）
-	if provider == id && (provider == "deepseek" || provider == "qwen") {
-		// id 本身就是 provider
-		provider = id
-	} else {
-		// 从 id 中提取 provider（假设格式是 userID_provider 或 timestamp_userID_provider）
-		parts := strings.Split(id, "_")
-		if len(parts) >= 2 {
-			provider = parts[len(parts)-1] // 取最后一部分作为 provider
-		} else {
-			provider = id
-		}
-	}
-
-	// 获取模型的基本信息
-	var name string
-	err = d.db.QueryRow(`
-		SELECT name FROM ai_models WHERE provider = ? LIMIT 1
-	`, provider).Scan(&name)
+		SELECT COUNT(*) FROM pragma_table_info('ai_models')
+		WHERE name = 'model_id'
+	`).Scan(&hasModelIDColumn)
 	if err != nil {
-		// 如果找不到基本信息，使用默认值
+		return fmt.Errorf("检查ai_models表结构失败: %w", err)
+	}
+
+	encryptedAPIKey := d.encryptSensitiveData(apiKey)
+
+	if hasModelIDColumn > 0 {
+		// ===== 新結構：有 model_id 列 =====
+		// 先尝试精确匹配 model_id
+		var existingModelID string
+		err = d.db.QueryRow(`
+			SELECT model_id FROM ai_models WHERE user_id = ? AND model_id = ? LIMIT 1
+		`, userID, id).Scan(&existingModelID)
+
+		if err == nil {
+			// 找到了现有配置，更新它
+			_, err = d.db.Exec(`
+				UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+				WHERE model_id = ? AND user_id = ?
+			`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
+			return err
+		}
+
+		// model_id 不存在，尝试通过 provider 查找（兼容舊邏輯）
+		provider := id
+		err = d.db.QueryRow(`
+			SELECT model_id FROM ai_models WHERE user_id = ? AND provider = ? LIMIT 1
+		`, userID, provider).Scan(&existingModelID)
+
+		if err == nil {
+			// 找到了现有配置（通过 provider 匹配），更新它
+			log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, existingModelID)
+			_, err = d.db.Exec(`
+				UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+				WHERE model_id = ? AND user_id = ?
+			`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingModelID, userID)
+			return err
+		}
+
+		// 没有找到任何现有配置，创建新的
+		provider = id
+		if strings.Contains(id, "_") {
+			parts := strings.Split(id, "_")
+			provider = parts[len(parts)-1]
+		}
+
+		// 获取默认名称
+		name := provider + " AI"
 		if provider == "deepseek" {
 			name = "DeepSeek AI"
 		} else if provider == "qwen" {
 			name = "Qwen AI"
-		} else {
-			name = provider + " AI"
 		}
+
+		newModelID := id
+		if id == provider {
+			newModelID = fmt.Sprintf("%s_%s", userID, provider)
+		}
+
+		log.Printf("✓ 创建新的 AI 模型配置: ID=%s, Provider=%s, Name=%s", newModelID, provider, name)
+		_, err = d.db.Exec(`
+			INSERT INTO ai_models (model_id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		`, newModelID, userID, name, provider, enabled, encryptedAPIKey, customAPIURL, customModelName)
+		return err
+
+	} else {
+		// ===== 舊結構：沒有 model_id 列，id 是 TEXT PRIMARY KEY =====
+		// 嘗試查找現有配置
+		var existingID string
+		err = d.db.QueryRow(`
+			SELECT id FROM ai_models WHERE user_id = ? AND id = ? LIMIT 1
+		`, userID, id).Scan(&existingID)
+
+		if err == nil {
+			// 找到了现有配置，更新它
+			_, err = d.db.Exec(`
+				UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+				WHERE id = ? AND user_id = ?
+			`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingID, userID)
+			return err
+		}
+
+		// 不存在，嘗試通過 provider 查找
+		err = d.db.QueryRow(`
+			SELECT id FROM ai_models WHERE user_id = ? AND provider = ? LIMIT 1
+		`, userID, id).Scan(&existingID)
+
+		if err == nil {
+			// 找到了现有配置（通过 provider 匹配），更新它
+			_, err = d.db.Exec(`
+				UPDATE ai_models SET enabled = ?, api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+				WHERE id = ? AND user_id = ?
+			`, enabled, encryptedAPIKey, customAPIURL, customModelName, existingID, userID)
+			return err
+		}
+
+		// 沒有找到，創建新的（舊結構）
+		provider := id
+		name := provider + " AI"
+		if provider == "deepseek" {
+			name = "DeepSeek AI"
+		} else if provider == "qwen" {
+			name = "Qwen AI"
+		}
+
+		_, err = d.db.Exec(`
+			INSERT OR IGNORE INTO ai_models (id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		`, id, userID, name, provider, enabled, encryptedAPIKey, customAPIURL, customModelName)
+		return err
 	}
-
-	// 如果传入的 ID 已经是完整格式（如 "admin_deepseek_custom1"），直接使用
-	// 否则生成新的 ID
-	newModelID := id
-	if id == provider {
-		// id 就是 provider，生成新的用户特定 ID
-		newModelID = fmt.Sprintf("%s_%s", userID, provider)
-	}
-
-	log.Printf("✓ 创建新的 AI 模型配置: ID=%s, Provider=%s, Name=%s", newModelID, provider, name)
-	encryptedAPIKey := d.encryptSensitiveData(apiKey)
-	_, err = d.db.Exec(`
-		INSERT INTO ai_models (model_id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-	`, newModelID, userID, name, provider, enabled, encryptedAPIKey, customAPIURL, customModelName)
-
-	return err
 }
 
 // GetExchanges 获取用户的交易所配置
@@ -1398,6 +1436,16 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string) error {
 	log.Printf("🔧 UpdateExchange: userID=%s, id=%s, enabled=%v", userID, id, enabled)
 
+	// 檢查表結構，判斷是否已遷移到自增ID結構
+	var hasExchangeIDColumn int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('exchanges')
+		WHERE name = 'exchange_id'
+	`).Scan(&hasExchangeIDColumn)
+	if err != nil {
+		return fmt.Errorf("检查exchanges表结构失败: %w", err)
+	}
+
 	// 构建动态 UPDATE SET 子句
 	// 基础字段：总是更新
 	setClauses := []string{
@@ -1429,14 +1477,23 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 		args = append(args, encryptedAsterPrivateKey)
 	}
 
-	// WHERE 条件
+	// WHERE 条件：根據表結構選擇正確的列名
 	args = append(args, id, userID)
 
-	// 构建完整的 UPDATE 语句
-	query := fmt.Sprintf(`
-		UPDATE exchanges SET %s
-		WHERE exchange_id = ? AND user_id = ?
-	`, strings.Join(setClauses, ", "))
+	var query string
+	if hasExchangeIDColumn > 0 {
+		// 新結構：使用 exchange_id
+		query = fmt.Sprintf(`
+			UPDATE exchanges SET %s
+			WHERE exchange_id = ? AND user_id = ?
+		`, strings.Join(setClauses, ", "))
+	} else {
+		// 舊結構：使用 id
+		query = fmt.Sprintf(`
+			UPDATE exchanges SET %s
+			WHERE id = ? AND user_id = ?
+		`, strings.Join(setClauses, ", "))
+	}
 
 	// 执行更新
 	result, err := d.db.Exec(query, args...)
@@ -1476,17 +1533,27 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 
 		log.Printf("🆕 UpdateExchange: 创建新记录 ID=%s, name=%s, type=%s", id, name, typ)
 
-		// 创建用户特定的配置，使用原始的交易所ID
+		// 创建用户特定的配置
 		// 加密敏感字段
 		encryptedAPIKey := d.encryptSensitiveData(apiKey)
 		encryptedSecretKey := d.encryptSensitiveData(secretKey)
 		encryptedAsterPrivateKey := d.encryptSensitiveData(asterPrivateKey)
 
-		_, err = d.db.Exec(`
-			INSERT INTO exchanges (exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet,
-			                       hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey)
+		if hasExchangeIDColumn > 0 {
+			// 新結構：使用 exchange_id 列
+			_, err = d.db.Exec(`
+				INSERT INTO exchanges (exchange_id, user_id, name, type, enabled, api_key, secret_key, testnet,
+				                       hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey)
+		} else {
+			// 舊結構：使用 id 作為 TEXT PRIMARY KEY
+			_, err = d.db.Exec(`
+				INSERT OR IGNORE INTO exchanges (id, user_id, name, type, enabled, api_key, secret_key, testnet,
+				                                 hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey)
+		}
 
 		if err != nil {
 			log.Printf("❌ UpdateExchange: 创建记录失败: %v", err)
