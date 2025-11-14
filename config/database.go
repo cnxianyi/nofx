@@ -430,10 +430,18 @@ func (d *Database) migrateExchangesTable() error {
 		return fmt.Errorf("创建新exchanges表失败: %w", err)
 	}
 
-	// 复制数据到新表
+	// 复制数据到新表（明确指定列名，兼容不同schema版本）
 	_, err = d.db.Exec(`
-		INSERT INTO exchanges_new 
-		SELECT * FROM exchanges
+		INSERT INTO exchanges_new (
+			id, user_id, name, type, enabled, api_key, secret_key, testnet,
+			hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key,
+			created_at, updated_at
+		)
+		SELECT
+			id, user_id, name, type, enabled, api_key, secret_key, testnet,
+			hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key,
+			created_at, updated_at
+		FROM exchanges
 	`)
 	if err != nil {
 		return fmt.Errorf("复制数据失败: %w", err)
