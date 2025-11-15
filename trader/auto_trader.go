@@ -716,7 +716,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 }
 
 func formatDecision(decision *decision.Decision) string {
-	return fmt.Sprintf("币种：%s\n开仓：%f\n杠杆：%d\n止损：%f\n止盈：%f", decision.Symbol, decision.PositionSizeUSD, decision.Leverage, decision.StopLoss, decision.TakeProfit)
+	return fmt.Sprintf("币种：%s\n持仓：%f\n杠杆：%d\n止损：%f\n止盈：%f", decision.Symbol, decision.PositionSizeUSD, decision.Leverage, decision.StopLoss, decision.TakeProfit)
 }
 
 // executeDecisionWithRecord 执行AI决策并记录详细信息
