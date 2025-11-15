@@ -111,14 +111,42 @@ func NewServer(traderManager *manager.TraderManager, database *config.Database, 
 
 // corsMiddleware CORS中间件（智能模式：开发环境自动允许私有网络）
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	// 检查是否完全禁用 CORS（用于内网环境或开发环境）
+	disableCORS := strings.EqualFold(os.Getenv("DISABLE_CORS"), "true")
+	if disableCORS {
+		log.Println("⚠️  [CORS] CORS 检查已完全禁用 (DISABLE_CORS=true)")
+		log.Println("    警告：这将允许所有来源访问 API，仅在安全的内网环境使用！")
+	}
+
 	// 检测是否为开发环境（默认为开发环境）
 	isDevelopment := os.Getenv("ENVIRONMENT") != "production"
+	if isDevelopment {
+		log.Println("🔧 [CORS] 开发模式：自动允许 localhost、.local 域名和私有网络 IP")
+	}
 
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		// 检查来源是否在白名单中
+		// 如果禁用了 CORS，允许所有请求
+		if disableCORS {
+			if origin != "" {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			}
+			if c.Request.Method == "OPTIONS" {
+				c.AbortWithStatus(http.StatusOK)
+				return
+			}
+			c.Next()
+			return
+		}
+
+		// 正常 CORS 检查流程
 		allowed := false
+
+		// 1. 检查白名单
 		for _, allowedOrigin := range allowedOrigins {
 			if origin == allowedOrigin {
 				allowed = true
@@ -126,34 +154,46 @@ func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 			}
 		}
 
-		// 如果不在白名单中，但是开发模式下检查是否为私有网络
+		// 2. 开发模式：检查是否为私有网络来源
 		if !allowed && isDevelopment && origin != "" {
-			allowed = isPrivateNetworkOrigin(origin)
-			if allowed {
-				log.Printf("🔓 [CORS] 开发模式：自动允许私有网络来源: %s", origin)
+			if isPrivateNetworkOrigin(origin) {
+				allowed = true
+				log.Printf("🔓 [CORS] 开发模式自动允许: %s (私有网络/localhost/.local)", origin)
 			}
 		}
 
+		// 3. 设置 CORS 响应头
 		if allowed {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
 		} else if origin != "" {
-			// 提供友好的错误信息和配置建议
-			log.Printf("⚠️ [CORS] 拒绝来源: %s", origin)
-			log.Printf("    提示：请在 .env 文件中添加：CORS_ALLOWED_ORIGINS=%s", origin)
-
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "Origin not allowed",
-				"origin": origin,
-				"help": "請在 .env 文件中添加此來源到 CORS_ALLOWED_ORIGINS",
-				"example": fmt.Sprintf("CORS_ALLOWED_ORIGINS=%s", origin),
-				"docs": "重啟容器後生效：docker-compose restart",
-			})
-			return
+			// 开发模式：只记录警告，但仍然允许请求（避免阻断开发）
+			if isDevelopment {
+				log.Printf("⚠️  [CORS] 开发模式警告：未识别的来源 %s", origin)
+				log.Printf("    提示：如需在生产环境使用，请添加到 .env: CORS_ALLOWED_ORIGINS=%s", origin)
+				// 开发模式下仍然设置 CORS 头，避免阻断
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			} else {
+				// 生产模式：严格拒绝
+				log.Printf("🚫 [CORS] 生产模式拒绝来源: %s", origin)
+				log.Printf("    配置方法：在 .env 添加 CORS_ALLOWED_ORIGINS=%s", origin)
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error":   "Origin not allowed",
+					"origin":  origin,
+					"help":    "請在 .env 文件中添加此來源到 CORS_ALLOWED_ORIGINS",
+					"example": fmt.Sprintf("CORS_ALLOWED_ORIGINS=%s", origin),
+					"docs":    "重啟容器後生效：docker-compose restart",
+				})
+				return
+			}
 		}
 
+		// 处理 OPTIONS 预检请求
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusOK)
 			return
@@ -164,13 +204,12 @@ func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 }
 
 // isPrivateNetworkOrigin 检查是否为私有网络来源
-// 支持 RFC 1918 私有地址范围：
-// - 10.0.0.0/8 (10.0.0.0 - 10.255.255.255)
-// - 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
-// - 192.168.0.0/16 (192.168.0.0 - 192.168.255.255)
+// 支持以下类型：
+// - localhost (localhost, 127.0.0.1, ::1)
+// - .local 域名 (mDNS/Bonjour，如 myserver.local)
+// - RFC 1918 私有 IP：10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
 func isPrivateNetworkOrigin(origin string) bool {
-	// 解析 origin URL
-	// origin 格式: http://192.168.1.100:3000
+	// 解析 origin URL (格式: http://192.168.1.100:3000 或 http://myserver.local:3000)
 	parts := strings.Split(origin, "://")
 	if len(parts) != 2 {
 		return false
@@ -179,13 +218,30 @@ func isPrivateNetworkOrigin(origin string) bool {
 	hostPort := parts[1]
 	host := strings.Split(hostPort, ":")[0]
 
-	// 解析 IP
+	// 1. 检查 localhost 变体
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
+	}
+
+	// 2. 检查 .local 域名 (mDNS)
+	if strings.HasSuffix(host, ".local") {
+		return true
+	}
+
+	// 3. 尝试解析为 IP 地址
 	ip := net.ParseIP(host)
 	if ip == nil {
+		// 不是 IP 地址也不是已知的本地域名，可能是内网域名
+		// 为了安全，这里返回 false，让用户手动添加到白名单
 		return false
 	}
 
-	// 检查是否为私有 IP
+	// 4. 检查是否为 loopback IP (127.0.0.0/8)
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// 5. 检查 RFC 1918 私有 IP 地址
 	privateIPBlocks := []*net.IPNet{
 		// 10.0.0.0/8
 		{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(8, 32)},
