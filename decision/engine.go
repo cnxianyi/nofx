@@ -152,9 +152,12 @@ func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error
 // GetFullDecisionWithCustomPrompt 获取AI的完整交易决策（支持自定义prompt和模板选择）
 func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, customPrompt string, overrideBase bool, templateName string) (*FullDecision, error) {
 	// 1. 为所有币种获取市场数据
+	fetchStart := time.Now()
 	if err := fetchMarketDataForContext(ctx); err != nil {
 		return nil, fmt.Errorf("获取市场数据失败: %w", err)
 	}
+	fetchDuration := time.Since(fetchStart).Seconds()
+	log.Printf("⏱️  市場數據獲取耗時: %.2fs（%d 個幣種）", fetchDuration, len(ctx.MarketDataMap))
 
 	// 1.5. ⚡ 獲取全局市場情緒（VIX + 美股，免費來源）
 	alphaVantageKey := os.Getenv("ALPHA_VANTAGE_API_KEY") // 可選，用於美股數據（免費 500 calls/day）
@@ -256,10 +259,14 @@ func fetchMarketDataForContext(ctx *Context) error {
 	// 收集结果并应用过滤
 	const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
 
+	// ✅ 錯誤統計
+	failedSymbols := []string{}
+	filteredSymbols := []string{}
+
 	for result := range resultChan {
 		if result.err != nil {
-			// 单个币种失败不影响整体，只记录错误
-			log.Printf("⚠️  获取 %s 市场数据失败: %v", result.symbol, result.err)
+			// 收集失敗的幣種（稍後統一報告）
+			failedSymbols = append(failedSymbols, result.symbol)
 			continue
 		}
 
@@ -275,13 +282,25 @@ func fetchMarketDataForContext(ctx *Context) error {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000 // 转换为百万美元单位
 			if oiValueInMillions < minOIThresholdMillions {
-				log.Printf("⚠️  %s 持仓价值过低(%.2fM USD < %.1fM)，跳过此币种 [持仓量:%.0f × 价格:%.4f]",
-					symbol, oiValueInMillions, minOIThresholdMillions, data.OpenInterest.Latest, data.CurrentPrice)
+				filteredSymbols = append(filteredSymbols, symbol)
 				continue
 			}
 		}
 
 		ctx.MarketDataMap[symbol] = data
+	}
+
+	// ✅ 統一報告結果
+	totalSymbols := len(symbolSet)
+	successCount := len(ctx.MarketDataMap)
+	log.Printf("📊 市場數據獲取完成：成功 %d/%d", successCount, totalSymbols)
+
+	if len(failedSymbols) > 0 {
+		log.Printf("⚠️  數據獲取失敗 (%d): %v", len(failedSymbols), failedSymbols)
+	}
+
+	if len(filteredSymbols) > 0 {
+		log.Printf("🔍 流動性過濾 (%d): %v", len(filteredSymbols), filteredSymbols)
 	}
 
 	// 加载OI Top数据（不影响主流程）
