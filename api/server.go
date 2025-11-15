@@ -2005,22 +2005,16 @@ func (s *Server) handlePerformance(c *gin.Context) {
 	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
 
 	// 获取用户 scan_interval_minutes
-	scanIntervalMinutes, err := s.database.GetSystemConfig("scan_interval_minutes")
+	traderConfig, _, _, err := s.database.GetTraderConfig(userID, traderID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("获取扫描间隔失败: %v", err),
+			"error": fmt.Sprintf("获取交易员配置失败: %v", err),
 		})
 		return
 	}
-	scanIntervalMinutesInt, err := strconv.Atoi(scanIntervalMinutes)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("获取扫描间隔失败: %v", err),
-		})
-		return
-	}
+	scanIntervalMinutes := traderConfig.ScanIntervalMinutes
 
-	performance, err := decisionLogger.AnalyzePerformance(4320 / scanIntervalMinutesInt) // 3天/扫描间隔
+	performance, err := decisionLogger.AnalyzePerformance(4320 / scanIntervalMinutes) // 3天
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("分析历史表现失败: %v", err),
