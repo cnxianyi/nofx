@@ -3,7 +3,6 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 )
@@ -15,15 +14,15 @@ type NotifyRequest struct {
 	Extra   map[string]interface{} `json:"extra"`
 }
 
-func SendNotify(title string, message string) error {
+func SendNotify(title string, message string) {
 	url := os.Getenv("NOTIFY_URL")
 	if url == "" {
-		return fmt.Errorf("NOTIFY_URL is not set")
+		return
 	}
 
 	target := os.Getenv("TG_TARGET_ID")
 	if target == "" {
-		return fmt.Errorf("TG_TARGET_ID is not set")
+		return
 	}
 
 	// 构建请求体
@@ -40,13 +39,13 @@ func SendNotify(title string, message string) error {
 	// 序列化为 JSON
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("序列化请求体失败: %w", err)
+		return
 	}
 
 	// 创建 HTTP 请求
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("创建请求失败: %w", err)
+		return
 	}
 
 	// 设置请求头
@@ -56,14 +55,13 @@ func SendNotify(title string, message string) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("发送请求失败: %w", err)
+		return
 	}
 	defer resp.Body.Close()
 
 	// 检查响应状态
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("请求失败，状态码: %d, 响应: %s", resp.StatusCode, resp.Body)
+		return
 	}
 
-	return nil
 }
