@@ -1350,10 +1350,10 @@ func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, custom
 			name = "Qwen AI"
 		}
 
+		// 🔧 修復：直接使用 id 作為 model_id，不生成新的 ID
+		// 這樣與前端發送的 provider 保持一致（如 "deepseek", "openai"）
+		// 下次更新時才能正確找到記錄
 		newModelID := id
-		if id == provider {
-			newModelID = fmt.Sprintf("%s_%s", userID, provider)
-		}
 
 		log.Printf("✓ 创建新的 AI 模型配置: ID=%s, Provider=%s, Name=%s", newModelID, provider, name)
 		result, err := d.db.Exec(`
