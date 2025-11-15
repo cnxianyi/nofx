@@ -344,9 +344,20 @@ func (m *WSMonitor) processKlineUpdate(symbol string, wsData KlineWSData, _time 
 	value, exists := klineDataMap.Load(symbol)
 	var klines []Kline
 	if exists {
-		// 从缓存条目中提取K线数据
-		entry := value.(*KlineCacheEntry)
-		klines = entry.Klines
+		// 安全的类型转换，兼容旧版本数据（向后兼容）
+		switch v := value.(type) {
+		case *KlineCacheEntry:
+			// 新版本格式：使用 KlineCacheEntry
+			klines = v.Klines
+		case []Kline:
+			// 旧版本格式：直接是 []Kline（兼容旧数据）
+			klines = v
+			log.Printf("⚠️ 检测到旧格式缓存数据 %s %s，将自动升级", symbol, _time)
+		default:
+			// 未知类型，重新初始化
+			log.Printf("❌ 未知的缓存数据类型 %s %s: %T，重新初始化", symbol, _time, v)
+			klines = []Kline{}
+		}
 
 		// 检查是否是新的K线
 		if len(klines) > 0 && klines[len(klines)-1].OpenTime == kline.OpenTime {
