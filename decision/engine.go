@@ -334,11 +334,11 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	// 2. 硬约束（风险控制）- 动态生成
 	sb.WriteString("# 硬约束（风险控制）\n\n")
 	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
-	sb.WriteString("2. 最多持仓: 3个币种（质量>数量）\n")
+	sb.WriteString("2. 最多持仓: 2个币种（质量>数量）\n")
 	sb.WriteString(fmt.Sprintf("3. 单币仓位: 山寨%.0f-%.0f U | BTC/ETH %.0f-%.0f U\n",
 		accountEquity*2.5, accountEquity*5, accountEquity*5, accountEquity*10))
 	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
-	sb.WriteString("5. 保证金: 总使用率 ≤ 90%\n")
+	sb.WriteString("5. 保证金: 总使用率 ≤ 70%\n")
 
 	// 6. 开仓金额：根据账户规模动态提示（使用统一的配置规则）
 	minBTCETH := calculateMinPositionSize("BTCUSDT", accountEquity)
@@ -363,8 +363,8 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	// ⚠️ 重要提醒：防止 AI 误读市场数据中的数字
 	sb.WriteString("⚠️ **重要提醒：计算 position_size_usd 的正确方法**\n\n")
 	sb.WriteString(fmt.Sprintf("- 当前账户净值：**%.2f USDT**\n", accountEquity))
-	sb.WriteString(fmt.Sprintf("- 山寨币开仓范围：**%.0f - %.0f USDT** (净值的 2.5-5 倍)\n", accountEquity*2.5, accountEquity*5))
-	sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 5-10 倍)\n", accountEquity*5, accountEquity*10))
+	sb.WriteString(fmt.Sprintf("- 山寨币开仓范围：**%.0f - %.0f USDT** (净值的 2-3 倍)\n", accountEquity*2, accountEquity*3))
+	sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 6-8 倍)\n", accountEquity*6, accountEquity*8))
 	sb.WriteString("- ❌ **不要使用市场数据中的任何数字**（如 Open Interest 合约数、Volume、价格等）作为 position_size_usd\n")
 	sb.WriteString("- ✅ **position_size_usd 必须根据账户净值和上述范围计算**\n\n")
 
@@ -783,9 +783,9 @@ var (
 
 	// BTC/ETH 动态调整规则（按账户规模分层）
 	btcEthSizeRules = []positionSizeConfig{
-		{MinEquity: 0, MinSize: absoluteMinimum, MaxSize: absoluteMinimum}, // 小账户(<20U): 12 USDT
-		{MinEquity: 20, MinSize: absoluteMinimum, MaxSize: standardBTCETH}, // 中型账户(20-100U): 线性插值
-		{MinEquity: 100, MinSize: standardBTCETH, MaxSize: standardBTCETH}, // 大账户(≥100U): 60 USDT
+		{MinEquity: 0, MinSize: absoluteMinimum, MaxSize: absoluteMinimum},  // 小账户(<20U): 12 USDT
+		{MinEquity: 100, MinSize: absoluteMinimum, MaxSize: standardBTCETH}, // 中型账户(20-100U): 线性插值
+		{MinEquity: 500, MinSize: standardBTCETH, MaxSize: standardBTCETH},  // 大账户(≥100U): 60 USDT
 	}
 
 	// 山寨币规则（始终使用绝对最小值）
