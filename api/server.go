@@ -2003,7 +2003,24 @@ func (s *Server) handlePerformance(c *gin.Context) {
 	// 分析最近100个周期的交易表现（避免长期持仓的交易记录丢失）
 	// 假设每3分钟一个周期，100个周期 = 5小时，足够覆盖大部分交易
 	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
-	performance, err := decisionLogger.AnalyzePerformance(100)
+
+	// 获取用户 scan_interval_minutes
+	scanIntervalMinutes, err := s.database.GetSystemConfig("scan_interval_minutes")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("获取扫描间隔失败: %v", err),
+		})
+		return
+	}
+	scanIntervalMinutesInt, err := strconv.Atoi(scanIntervalMinutes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("获取扫描间隔失败: %v", err),
+		})
+		return
+	}
+
+	performance, err := decisionLogger.AnalyzePerformance(4320 / scanIntervalMinutesInt) // 3天/扫描间隔
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("分析历史表现失败: %v", err),
