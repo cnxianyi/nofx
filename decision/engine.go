@@ -7,6 +7,7 @@ import (
 	"math"
 	"nofx/market"
 	"nofx/mcp"
+	"nofx/notify"
 	"nofx/pool"
 	"regexp"
 	"strings"
@@ -145,6 +146,7 @@ func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient *mcp.Client, custom
 	aiResponse, err := mcpClient.CallWithMessages(systemPrompt, userPrompt)
 	aiCallDuration := time.Since(aiCallStart)
 	if err != nil {
+		notify.SendNotify("AI API 调用失败", err.Error())
 		return nil, fmt.Errorf("调用AI API失败: %w", err)
 	}
 

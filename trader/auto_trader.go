@@ -10,6 +10,7 @@ import (
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
+	"nofx/notify"
 	"nofx/pool"
 	"strings"
 	"sync"
@@ -714,27 +715,46 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	return ctx, nil
 }
 
+func formatDecision(decision *decision.Decision) string {
+	return fmt.Sprintf("币种：%s\n开仓：%f\n杠杆：%d\n止损：%f\n止盈：%f", decision.Symbol, decision.PositionSizeUSD, decision.Leverage, decision.StopLoss, decision.TakeProfit)
+}
+
 // executeDecisionWithRecord 执行AI决策并记录详细信息
 func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
 	switch decision.Action {
 	case "open_long":
+		message := formatDecision(decision)
+		notify.SendNotify("开多仓", message)
 		return at.executeOpenLongWithRecord(decision, actionRecord)
 	case "open_short":
+		message := formatDecision(decision)
+		notify.SendNotify("开空仓", message)
 		return at.executeOpenShortWithRecord(decision, actionRecord)
 	case "close_long":
+		message := formatDecision(decision)
+		notify.SendNotify("平多仓", message)
 		return at.executeCloseLongWithRecord(decision, actionRecord)
 	case "close_short":
+		message := formatDecision(decision)
+		notify.SendNotify("平空仓", message)
 		return at.executeCloseShortWithRecord(decision, actionRecord)
 	case "update_stop_loss":
+		message := formatDecision(decision)
+		notify.SendNotify("更新止损", message)
 		return at.executeUpdateStopLossWithRecord(decision, actionRecord)
 	case "update_take_profit":
+		message := formatDecision(decision)
+		notify.SendNotify("更新止盈", message)
 		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
 	case "partial_close":
+		message := formatDecision(decision)
+		notify.SendNotify("部分平仓", message)
 		return at.executePartialCloseWithRecord(decision, actionRecord)
 	case "hold", "wait":
 		// 无需执行，仅记录
 		return nil
 	default:
+		notify.SendNotify("未知的action", fmt.Sprintf("未知的action: %s", decision.Action))
 		return fmt.Errorf("未知的action: %s", decision.Action)
 	}
 }
