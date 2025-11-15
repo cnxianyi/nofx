@@ -498,7 +498,7 @@ Open your browser and visit: **🌐 http://localhost:3000**
 
 1. **Visit Hyperliquid with Referral Link** (get benefits!):
 
-   **🎁 [Register Hyperliquid - Join AITRADING](https://app.hyperliquid.xyz/join/AITRADING)**
+   **🎁 [Register Hyperliquid - Join NOFXAI](https://app.hyperliquid.xyz/join/NOFXAI)**
 
 2. **Connect Your Wallet**:
    - Click "Connect Wallet" on the top right
