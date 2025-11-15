@@ -20,6 +20,7 @@ func SanitizeModelConfigForLog(models map[string]struct {
 	Enabled         bool   `json:"enabled"`
 	APIKey          string `json:"api_key"`
 	CustomAPIURL    string `json:"custom_api_url"`
+	CustomAiName    string `json:"custom_ai_name"`
 	CustomModelName string `json:"custom_model_name"`
 }) map[string]interface{} {
 	safe := make(map[string]interface{})
@@ -28,6 +29,7 @@ func SanitizeModelConfigForLog(models map[string]struct {
 			"enabled":           cfg.Enabled,
 			"api_key":           MaskSensitiveString(cfg.APIKey),
 			"custom_api_url":    cfg.CustomAPIURL,
+			"custom_ai_name":    cfg.CustomAiName,
 			"custom_model_name": cfg.CustomModelName,
 		}
 	}

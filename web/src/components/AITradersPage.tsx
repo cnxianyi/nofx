@@ -471,56 +471,69 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   }
 
   const handleDeleteModelConfig = async (modelId: string) => {
-    await handleDeleteConfig({
-      id: modelId,
-      type: 'model',
-      checkInUse: isModelUsedByAnyTrader,
-      getUsingTraders: getTradersUsingModel,
-      cannotDeleteKey: 'cannotDeleteModelInUse',
-      confirmDeleteKey: 'confirmDeleteModel',
-      allItems: allModels,
-      clearFields: (m) => ({
-        ...m,
-        apiKey: '',
-        customApiUrl: '',
-        customModelName: '',
-        enabled: false,
-      }),
-      buildRequest: (models) => ({
-        models: Object.fromEntries(
-          models.map((model) => [
-            model.provider,
-            {
-              enabled: model.enabled,
-              api_key: model.apiKey || '',
-              custom_api_url: model.customApiUrl || '',
-              custom_model_name: model.customModelName || '',
-            },
-          ])
-        ),
-      }),
-      updateApi: api.updateModelConfigs,
-      setItems: async () => {
-        await mutateModels() // 等待刷新完成
-      },
-      closeModal: () => {
-        setShowModelModal(false)
-        setEditingModel(null)
-      },
-      errorKey: 'deleteConfigFailed',
-    })
+    // 检查是否有交易员正在使用
+    if (isModelUsedByAnyTrader(modelId)) {
+      const usingTraders = getTradersUsingModel(modelId)
+      const traderNames = usingTraders.map((t) => t.trader_name).join(', ')
+      toast.error(
+        `${t('cannotDeleteModelInUse', language)} · ${t('tradersUsing', language)}: ${traderNames} · ${t('pleaseDeleteTradersFirst', language)}`
+      )
+      return
+    }
+
+    {
+      const ok = await confirmToast(t('confirmDeleteModel', language))
+      if (!ok) return
+    }
+
+    try {
+      // 找到要删除的模型
+      const modelToDelete = allModels?.find((m) => m.id === modelId)
+      if (!modelToDelete) {
+        toast.error(t('modelNotExist', language))
+        return
+      }
+
+      // 只发送要删除的模型，使用 model.id 作为 key
+      const request = {
+        models: {
+          [modelId]: {
+            enabled: false,
+            api_key: '',
+            custom_api_url: '',
+            custom_ai_name: '',
+            custom_model_name: '',
+          },
+        },
+      }
+
+      await toast.promise(api.updateModelConfigs(request), {
+        loading: '正在删除模型配置…',
+        success: '模型配置已删除',
+        error: '删除模型配置失败',
+      })
+
+      // 使用 SWR mutate 自动刷新数据（等待刷新完成）
+      await mutateModels()
+
+      setShowModelModal(false)
+      setEditingModel(null)
+    } catch (error) {
+      console.error('Failed to delete model config:', error)
+      toast.error(t('deleteConfigFailed', language))
+    }
   }
 
   const handleSaveModelConfig = async (
     modelId: string,
     apiKey: string,
     customApiUrl?: string,
+    aiName?: string,
     customModelName?: string
   ) => {
     try {
       // 创建或更新用户的模型配置
       const existingModel = allModels?.find((m) => m.id === modelId)
-      let updatedModels
 
       // 找到要配置的模型（优先从已配置列表，其次从支持列表）
       const modelToUpdate =
@@ -530,44 +543,44 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         return
       }
 
-      if (existingModel) {
-        // 更新现有配置
-        updatedModels =
-          allModels?.map((m) =>
-            m.id === modelId
-              ? {
-                  ...m,
-                  apiKey,
-                  customApiUrl: customApiUrl || '',
-                  customModelName: customModelName || '',
-                  enabled: true,
-                }
-              : m
-          ) || []
-      } else {
-        // 添加新配置
-        const newModel = {
-          ...modelToUpdate,
-          apiKey,
-          customApiUrl: customApiUrl || '',
-          customModelName: customModelName || '',
-          enabled: true,
-        }
-        updatedModels = [...(allModels || []), newModel]
+      // 只构建要更新的模型配置，不包含其他模型
+      let modelKey: string
+      let modelToSend: {
+        enabled: boolean
+        api_key: string
+        custom_api_url: string
+        custom_ai_name: string
+        custom_model_name: string
       }
 
+      if (existingModel) {
+        // 更新现有配置 - 使用 model_id 作为 key
+        modelKey = modelId
+        modelToSend = {
+          enabled: true,
+          api_key: apiKey,
+          custom_api_url: customApiUrl || '',
+          custom_ai_name: aiName || existingModel.name || '',
+          custom_model_name: customModelName || '',
+        }
+      } else {
+        // 添加新配置 - 生成唯一的 model_id
+        const uniqueModelId = `${modelToUpdate.provider}_${Date.now()}`
+        modelKey = uniqueModelId
+        modelToSend = {
+          enabled: true,
+          api_key: apiKey,
+          custom_api_url: customApiUrl || '',
+          custom_ai_name: aiName || modelToUpdate.name || '',
+          custom_model_name: customModelName || '',
+        }
+      }
+
+      // 只发送要更新的模型，避免覆盖其他模型
       const request = {
-        models: Object.fromEntries(
-          updatedModels.map((model) => [
-            model.provider, // 使用 provider 而不是 id
-            {
-              enabled: model.enabled,
-              api_key: model.apiKey || '',
-              custom_api_url: model.customApiUrl || '',
-              custom_model_name: model.customModelName || '',
-            },
-          ])
-        ),
+        models: {
+          [modelKey]: modelToSend,
+        },
       }
 
       await toast.promise(api.updateModelConfigs(request), {
@@ -1780,6 +1793,7 @@ function ModelConfigModal({
     modelId: string,
     apiKey: string,
     baseUrl?: string,
+    aiName?: string,
     modelName?: string
   ) => void
   onDelete: (modelId: string) => void
@@ -1789,6 +1803,7 @@ function ModelConfigModal({
   const [selectedModelId, setSelectedModelId] = useState(editingModelId || initialModelId || '')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [aiName, setAiName] = useState('')
   const [modelName, setModelName] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
 
@@ -1797,12 +1812,22 @@ function ModelConfigModal({
     ? configuredModels?.find((m) => m.id === selectedModelId)
     : allModels?.find((m) => m.id === selectedModelId)
 
-  // 如果是编辑现有模型，初始化API Key、Base URL和Model Name
+  // 初始化API Key、Base URL、AI Name和Model Name
   useEffect(() => {
-    if (editingModelId && selectedModel) {
-      setApiKey(selectedModel.apiKey || '')
-      setBaseUrl(selectedModel.customApiUrl || '')
-      setModelName(selectedModel.customModelName || '')
+    if (selectedModel) {
+      if (editingModelId) {
+        // 编辑模式：从已配置的模型加载
+        setApiKey(selectedModel.apiKey || '')
+        setBaseUrl(selectedModel.customApiUrl || '')
+        setAiName(selectedModel.name || '')
+        setModelName(selectedModel.customModelName || '')
+      } else {
+        // 新建模式：使用默认值，但允许用户修改
+        setApiKey('')
+        setBaseUrl('')
+        setAiName(selectedModel.name || '')
+        setModelName('')
+      }
     }
   }, [editingModelId, selectedModel])
 
@@ -1814,6 +1839,7 @@ function ModelConfigModal({
       selectedModelId,
       apiKey.trim(),
       baseUrl.trim() || undefined,
+      aiName.trim() || undefined,
       modelName.trim() || undefined
     )
   }
@@ -2046,6 +2072,30 @@ function ModelConfigModal({
                   />
                   <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
                     {t('leaveBlankForDefault', language)}
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    className="block text-sm font-semibold mb-2"
+                    style={{ color: '#EAECEF' }}
+                  >
+                    {t('customAiName', language) || 'AI Name (可选)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={aiName}
+                    onChange={(e) => setAiName(e.target.value)}
+                    placeholder={t('customAiNamePlaceholder', language) || '例如: 我的DeepSeek助手'}
+                    className="w-full px-3 py-2 rounded"
+                    style={{
+                      background: '#0B0E11',
+                      border: '1px solid #2B3139',
+                      color: '#EAECEF',
+                    }}
+                  />
+                  <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                    {t('customAiNameHint', language) || '留空使用默认名称'}
                   </div>
                 </div>
 

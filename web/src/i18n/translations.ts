@@ -195,6 +195,7 @@ export const translations = {
     // AI Model Configuration
     officialAPI: 'Official API',
     customAPI: 'Custom API',
+    customAiName: 'AI Name',
     apiKey: 'API Key',
     customAPIURL: 'Custom API URL',
     enterAPIKey: 'Enter API Key',
@@ -1069,6 +1070,7 @@ export const translations = {
     officialAPI: '官方API',
     customAPI: '自定义API',
     apiKey: 'API密钥',
+    customAiName: 'AI名称',
     customAPIURL: '自定义API地址',
     enterAPIKey: '请输入API密钥',
     enterCustomAPIURL: '请输入自定义API端点地址',

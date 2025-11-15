@@ -52,12 +52,14 @@ func TestSanitizeModelConfigForLog(t *testing.T) {
 		Enabled         bool   `json:"enabled"`
 		APIKey          string `json:"api_key"`
 		CustomAPIURL    string `json:"custom_api_url"`
+		CustomAiName    string `json:"custom_ai_name"`
 		CustomModelName string `json:"custom_model_name"`
 	}{
 		"deepseek": {
 			Enabled:         true,
 			APIKey:          "sk-1234567890abcdefghijklmnopqrstuvwxyz",
 			CustomAPIURL:    "https://api.deepseek.com",
+			CustomAiName:    "我的DeepSeek助手",
 			CustomModelName: "deepseek-chat",
 		},
 	}

@@ -28,7 +28,7 @@ type DatabaseInterface interface {
 	GetAllUsers() ([]string, error)
 	UpdateUserOTPVerified(userID string, verified bool) error
 	GetAIModels(userID string) ([]*AIModelConfig, error)
-	UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customModelName string) error
+	UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customAiName, customModelName string) error
 	GetExchanges(userID string) ([]*ExchangeConfig, error)
 	UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string) error
 	CreateAIModel(userID, id, name, provider string, enabled bool, apiKey, customAPIURL string) error
@@ -594,7 +594,7 @@ func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
 }
 
 // UpdateAIModel 更新AI模型配置，如果不存在则创建用户特定配置
-func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customModelName string) error {
+func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customAiName, customModelName string) error {
 	collection := d.db.Collection("ai_models")
 
 	// 先尝试精确匹配 model_id
@@ -604,78 +604,113 @@ func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, custom
 
 	if err == nil {
 		// 找到了现有配置，更新它
-		encryptedAPIKey := d.encryptSensitiveData(apiKey)
+		updateData := bson.M{
+			"enabled":           enabled,
+			"custom_api_url":    customAPIURL,
+			"custom_model_name": customModelName,
+			"updated_at":        time.Now(),
+		}
+		// 只有在提供了 apiKey 时才更新（避免覆盖为空）
+		if apiKey != "" {
+			encryptedAPIKey := d.encryptSensitiveData(apiKey)
+			updateData["api_key"] = encryptedAPIKey
+		}
+		// 只有在更新时且提供了 customAiName 时才更新 name 字段
+		if customAiName != "" {
+			updateData["name"] = customAiName
+		}
 		update := bson.M{
-			"$set": bson.M{
-				"enabled":           enabled,
-				"api_key":           encryptedAPIKey,
-				"custom_api_url":    customAPIURL,
-				"custom_model_name": customModelName,
-				"updated_at":        time.Now(),
-			},
+			"$set": updateData,
 		}
 		_, err = collection.UpdateOne(d.ctx, filter, update)
 		return err
 	}
 
-	// model_id 不存在，尝试兼容旧逻辑：将 id 作为 provider 查找
-	provider := id
-	filter = bson.M{"user_id": userID, "provider": provider}
-	err = collection.FindOne(d.ctx, filter).Decode(&existingModel)
+	// model_id 不存在，检查是否是新建（通过时间戳判断）
+	// 如果 id 包含时间戳（格式：provider_timestamp），则认为是新建
+	parts := strings.Split(id, "_")
+	isNewModel := len(parts) >= 2 && len(parts[len(parts)-1]) >= 13 // 时间戳至少13位（毫秒级）
 
-	if err == nil {
-		// 找到了现有配置（通过 provider 匹配，兼容旧版），更新它
-		modelID, _ := existingModel["model_id"].(string)
-		log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, modelID)
-		encryptedAPIKey := d.encryptSensitiveData(apiKey)
-		update := bson.M{
-			"$set": bson.M{
+	var provider string
+	if !isNewModel {
+		// 兼容旧逻辑：将 id 作为 provider 查找
+		provider = id
+		filter = bson.M{"user_id": userID, "provider": provider}
+		err = collection.FindOne(d.ctx, filter).Decode(&existingModel)
+
+		if err == nil {
+			// 找到了现有配置（通过 provider 匹配，兼容旧版），更新它
+			modelID, _ := existingModel["model_id"].(string)
+			log.Printf("⚠️  使用旧版 provider 匹配更新模型: %s -> %s", provider, modelID)
+			updateData := bson.M{
 				"enabled":           enabled,
-				"api_key":           encryptedAPIKey,
 				"custom_api_url":    customAPIURL,
 				"custom_model_name": customModelName,
 				"updated_at":        time.Now(),
-			},
+			}
+			// 只有在提供了 apiKey 时才更新（避免覆盖为空）
+			if apiKey != "" {
+				encryptedAPIKey := d.encryptSensitiveData(apiKey)
+				updateData["api_key"] = encryptedAPIKey
+			}
+			// 只有在更新时且提供了 customAiName 时才更新 name 字段
+			if customAiName != "" {
+				updateData["name"] = customAiName
+			}
+			update := bson.M{
+				"$set": updateData,
+			}
+			_, err = collection.UpdateOne(d.ctx, bson.M{"user_id": userID, "model_id": modelID}, update)
+			return err
 		}
-		_, err = collection.UpdateOne(d.ctx, bson.M{"user_id": userID, "model_id": modelID}, update)
-		return err
-	}
-
-	// 没有找到任何现有配置，创建新的
-	// 推断 provider
-	if provider == id && (provider == "deepseek" || provider == "qwen") {
-		provider = id
-	} else {
-		parts := strings.Split(id, "_")
-		if len(parts) >= 2 {
-			provider = parts[len(parts)-1]
-		} else {
+		// 没有找到，继续创建新配置
+		// 推断 provider
+		if id == "deepseek" || id == "qwen" {
 			provider = id
+		} else {
+			if len(parts) >= 2 {
+				provider = parts[len(parts)-1]
+			} else {
+				provider = id
+			}
 		}
+	} else {
+		// 新模型：从 id 中提取 provider（格式：provider_timestamp）
+		provider = strings.Join(parts[:len(parts)-1], "_")
 	}
 
 	// 获取模型的基本信息
 	var name string
-	filter = bson.M{"provider": provider}
-	var modelInfo bson.M
-	err = collection.FindOne(d.ctx, filter).Decode(&modelInfo)
-	if err == nil {
-		name, _ = modelInfo["name"].(string)
-	}
-	if name == "" {
-		// 使用默认值
-		if provider == "deepseek" {
-			name = "DeepSeek AI"
-		} else if provider == "qwen" {
-			name = "Qwen AI"
-		} else {
-			name = provider + " AI"
+	// 如果提供了自定义名称，优先使用
+	if customAiName != "" {
+		name = customAiName
+	} else {
+		// 否则从已有配置中获取或使用默认值
+		filter = bson.M{"provider": provider}
+		var modelInfo bson.M
+		err = collection.FindOne(d.ctx, filter).Decode(&modelInfo)
+		if err == nil {
+			name, _ = modelInfo["name"].(string)
+		}
+		if name == "" {
+			// 使用默认值
+			if provider == "deepseek" {
+				name = "DeepSeek AI"
+			} else if provider == "qwen" {
+				name = "Qwen AI"
+			} else {
+				name = provider + " AI"
+			}
 		}
 	}
 
 	// 生成新的 ID
 	newModelID := id
-	if id == provider {
+	if isNewModel {
+		// 新模型：直接使用传入的 id（已包含时间戳）
+		newModelID = id
+	} else if id == provider {
+		// 旧逻辑：生成 userID_provider 格式
 		newModelID = fmt.Sprintf("%s_%s", userID, provider)
 	}
 
