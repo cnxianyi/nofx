@@ -117,7 +117,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/complete-registration", s.handleCompleteRegistration)
 
 		// webhook
-		api.POST("/webhook", Webhook)
+		api.POST("/webhook", s.handleWebhook)
 
 		// 需要认证的路由
 		protected := api.Group("/", s.authMiddleware())
@@ -1890,22 +1890,28 @@ func (s *Server) handleCompetition(c *gin.Context) {
 	c.JSON(http.StatusOK, competition)
 }
 
-// handleEquityHistory 收益率历史数据
+// handleEquityHistory 收益率历史数据（公开接口，无需认证）
 func (s *Server) handleEquityHistory(c *gin.Context) {
-	userID := c.GetString("user_id")
-	_, traderID, err := s.getTraderFromQuery(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	traderID := c.Query("trader_id")
+	if traderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing trader_id parameter"})
 		return
 	}
 
+	// 从数据库获取userID（公开接口，需要通过traderID查询userID）
+	userID, err := s.database.GetUserIDByTraderID(traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "trader not found"})
+		return
+	}
+
+	// 验证trader是否存在
 	if _, err := s.traderManager.GetTrader(traderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 获取尽可能多的历史数据（几天的数据）
-	// 每3分钟一个周期：10000条 = 约20天的数据
+	// 从MongoDB获取历史数据
 	decisionLogger := logger.NewDecisionLogger(s.database, userID, traderID)
 	records, err := decisionLogger.GetLatestRecords(10000)
 	if err != nil {
@@ -1927,28 +1933,26 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		CycleNumber      int     `json:"cycle_number"`
 	}
 
-	// 从AutoTrader获取当前初始余额（用作旧数据的fallback）
+	// 从第一条记录获取初始余额（如果记录中有）
 	base := 0.0
-	trader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
+	if len(records) > 0 && records[0].AccountState.InitialBalance > 0 {
+		base = records[0].AccountState.InitialBalance
 	}
-	account, err := trader.GetAccountInfo()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("获取账户信息失败: %v", err),
-		})
-		return
+
+	// 如果记录中没有初始余额，尝试从trader获取
+	if base == 0 {
+		trader, err := s.traderManager.GetTrader(traderID)
+		if err == nil {
+			if account, err := trader.GetAccountInfo(); err == nil {
+				if ib, ok := account["initial_balance"].(float64); ok && ib > 0 {
+					base = ib
+				}
+			}
+		}
 	}
-	base = account["initial_balance"].(float64)
 
 	var history []EquityPoint
 	for _, record := range records {
-		// TotalBalance字段实际存储的是TotalEquity
-		// totalEquity := record.AccountState.TotalBalance
-		// TotalUnrealizedProfit字段实际存储的是TotalPnL（相对初始余额）
-		// totalPnL := record.AccountState.TotalUnrealizedProfit
 		walletBalance := record.AccountState.TotalBalance
 		unrealizedPnL := record.AccountState.TotalUnrealizedProfit
 		totalEquity := walletBalance + unrealizedPnL

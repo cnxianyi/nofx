@@ -282,14 +282,14 @@ func (at *AutoTrader) Run() error {
 	defer ticker.Stop()
 
 	// 首次立即执行
-	if err := at.runCycle(); err != nil {
+	if err := at.RunCycle(""); err != nil {
 		log.Printf("❌ 执行失败: %v", err)
 	}
 
 	for at.isRunning {
 		select {
 		case <-ticker.C:
-			if err := at.runCycle(); err != nil {
+			if err := at.RunCycle(""); err != nil {
 				log.Printf("❌ 执行失败: %v", err)
 			}
 		case <-at.stopMonitorCh:
@@ -313,8 +313,14 @@ func (at *AutoTrader) Stop() {
 }
 
 // runCycle 运行一个交易周期（使用AI全权决策）
-func (at *AutoTrader) runCycle() error {
+func (at *AutoTrader) RunCycle(webhookPrompt string) error {
 	at.callCount++
+
+	if webhookPrompt == "" {
+		log.Printf("🔔 定时执行")
+	} else {
+		log.Printf("🔔 触发 Webhook")
+	}
 
 	log.Print("\n" + strings.Repeat("=", 70) + "\n")
 	log.Printf("⏰ %s - AI决策周期 #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
@@ -423,7 +429,7 @@ func (at *AutoTrader) runCycle() error {
 
 	// 5. 调用AI获取完整决策
 	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
-	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate)
+	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate, webhookPrompt)
 
 	if decision != nil && decision.AIRequestDurationMs > 0 {
 		record.AIRequestDurationMs = decision.AIRequestDurationMs

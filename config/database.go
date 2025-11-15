@@ -54,6 +54,7 @@ type DatabaseInterface interface {
 	GetBetaCodeStats() (total, used int, err error)
 	SaveDecisionLog(userID, traderID string, record interface{}) error
 	GetDecisionLogs(userID, traderID string, limit int) ([]bson.M, error)
+	GetUserIDByTraderID(traderID string) (string, error)
 	Close() error
 }
 
@@ -1551,4 +1552,18 @@ func (d *Database) GetDecisionLogs(userID, traderID string, limit int) ([]bson.M
 	}
 
 	return results, nil
+}
+
+// GetUserIDByTraderID 通过traderID获取userID
+func (d *Database) GetUserIDByTraderID(traderID string) (string, error) {
+	collection := d.db.Collection("traders")
+	filter := bson.M{"id": traderID}
+	var trader struct {
+		UserID string `bson:"user_id"`
+	}
+	err := collection.FindOne(d.ctx, filter).Decode(&trader)
+	if err != nil {
+		return "", err
+	}
+	return trader.UserID, nil
 }
