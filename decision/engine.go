@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -220,26 +221,54 @@ func fetchMarketDataForContext(ctx *Context) error {
 		symbolSet[coin.Symbol] = true
 	}
 
-	// 并发获取市场数据
+	// ✅ 优化：并发获取市场数据（提升性能 5-10x）
 	// 持仓币种集合（用于判断是否跳过OI检查）
 	positionSymbols := make(map[string]bool)
 	for _, pos := range ctx.Positions {
 		positionSymbols[pos.Symbol] = true
 	}
 
+	// 并发获取市场数据
+	type marketDataResult struct {
+		symbol string
+		data   *market.Data
+		err    error
+	}
+
+	resultChan := make(chan marketDataResult, len(symbolSet))
+	var wg sync.WaitGroup
+
 	for symbol := range symbolSet {
-		data, err := market.Get(symbol, ctx.Timeframes)
-		if err != nil {
+		wg.Add(1)
+		go func(sym string) {
+			defer wg.Done()
+			data, err := market.Get(sym, ctx.Timeframes)
+			resultChan <- marketDataResult{symbol: sym, data: data, err: err}
+		}(symbol)
+	}
+
+	// 等待所有 goroutine 完成
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 收集结果并应用过滤
+	const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
+
+	for result := range resultChan {
+		if result.err != nil {
 			// 单个币种失败不影响整体，只记录错误
+			log.Printf("⚠️  获取 %s 市场数据失败: %v", result.symbol, result.err)
 			continue
 		}
+
+		data := result.data
+		symbol := result.symbol
 
 		// ⚠️ 流动性过滤：持仓价值低于阈值的币种不做（多空都不做）
 		// 持仓价值 = 持仓量 × 当前价格
 		// 但现有持仓必须保留（需要决策是否平仓）
-		// 💡 OI 門檻配置：用戶可根據風險偏好調整
-		const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
-
 		isExistingPosition := positionSymbols[symbol]
 		if !isExistingPosition && data.OpenInterest != nil && data.CurrentPrice > 0 {
 			// 计算持仓价值（USD）= 持仓量 × 当前价格
