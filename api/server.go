@@ -2680,17 +2680,50 @@ func (s *Server) getEquityHistoryForTraders(traderIDs []string) map[string]inter
 			continue
 		}
 
+		// 获取初始余额（用于计算PNL百分比）
+		base := 0.0
+		if len(records) > 0 && records[0].AccountState.InitialBalance > 0 {
+			base = records[0].AccountState.InitialBalance
+		}
+		// 如果记录中没有初始余额，尝试从trader获取
+		if base == 0 {
+			if account, err := trader.GetAccountInfo(); err == nil {
+				if ib, ok := account["initial_balance"].(float64); ok && ib > 0 {
+					base = ib
+				}
+			}
+		}
+
 		// 构建收益率历史数据
 		history := make([]map[string]interface{}, 0, len(records))
 		for _, record := range records {
 			// 计算总权益（余额+未实现盈亏）
 			totalEquity := record.AccountState.TotalBalance + record.AccountState.TotalUnrealizedProfit
 
+			// 🔄 使用历史记录中保存的initial_balance（如果有）
+			// 这样可以保持历史PNL%的准确性，即使用户后来更新了initial_balance
+			recordBase := base
+			if record.AccountState.InitialBalance > 0 {
+				recordBase = record.AccountState.InitialBalance
+			}
+
+			// 计算总盈亏和盈亏百分比
+			totalPnL := totalEquity - recordBase
+			totalPnLPct := 0.0
+			if recordBase > 0 {
+				totalPnLPct = (totalPnL / recordBase) * 100
+			}
+
+			if record.AccountState.TotalBalance == 0 {
+				continue
+			}
+
 			history = append(history, map[string]interface{}{
-				"timestamp":    record.Timestamp,
-				"total_equity": totalEquity,
-				"total_pnl":    record.AccountState.TotalUnrealizedProfit,
-				"balance":      record.AccountState.TotalBalance,
+				"timestamp":     record.Timestamp,
+				"total_equity":  totalEquity,
+				"total_pnl":     totalPnL,
+				"total_pnl_pct": totalPnLPct,
+				"balance":       record.AccountState.TotalBalance,
 			})
 		}
 
