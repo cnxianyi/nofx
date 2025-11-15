@@ -275,10 +275,19 @@ func getModelLimits(modelName string) ModelLimits {
 
 	// DeepSeek 系列
 	if strings.Contains(modelLower, "deepseek") {
+		// DeepSeek-V3/V2: 128K context window
+		if strings.Contains(modelLower, "v3") || strings.Contains(modelLower, "v2") {
+			return ModelLimits{
+				SystemPromptLimit: 100000, // 留28K buffer給輸出
+				TotalLimit:        128000, // 128K context
+				Model:             "DeepSeek-V3/V2",
+			}
+		}
+		// deepseek-chat（舊版本）: 32K context
 		return ModelLimits{
-			SystemPromptLimit: 64000,
-			TotalLimit:        64000,
-			Model:             "DeepSeek",
+			SystemPromptLimit: 24000, // 留8K buffer給輸出
+			TotalLimit:        32000, // 32K context
+			Model:             "DeepSeek-Chat",
 		}
 	}
 
