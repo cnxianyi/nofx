@@ -89,6 +89,9 @@ type AutoTraderConfig struct {
 	OrderStrategy       string  // Order strategy: "market_only", "conservative_hybrid", "limit_only"
 	LimitPriceOffset    float64 // Limit order price offset percentage (e.g., -0.03 for -0.03%)
 	LimitTimeoutSeconds int     // Timeout in seconds before converting to market order
+
+	// K线时间线配置
+	Timeframes []string // K线时间线选择，例如: ["1m", "15m", "1h", "4h"]
 }
 
 // AutoTrader 自动交易器
@@ -106,6 +109,7 @@ type AutoTrader struct {
 	customPrompt          string   // 自定义交易策略prompt
 	overrideBasePrompt    bool     // 是否覆盖基础prompt
 	systemPromptTemplate  string   // 系统提示词模板名称
+	timeframes            []string // K线时间线配置
 	defaultCoins          []string // 默认币种列表（从数据库获取）
 	tradingCoins          []string // 实际交易币种列表
 	useCoinPool           bool     // 是否使用 AI500 Coin Pool 信号源
@@ -707,6 +711,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
 		TakerFeeRate:    at.config.TakerFeeRate,    // Use configured taker fee rate
 		MakerFeeRate:    at.config.MakerFeeRate,    // Use configured maker fee rate
+		Timeframes:      at.timeframes,             // K线时间线配置
 		Account: decision.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
@@ -766,7 +771,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	}
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -850,7 +855,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	}
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -924,7 +929,7 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 	log.Printf("  🔄 平多仓: %s", decision.Symbol)
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -950,7 +955,7 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 	log.Printf("  🔄 平空仓: %s", decision.Symbol)
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -976,7 +981,7 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	log.Printf("  🎯 调整止损: %s → %.2f", decision.Symbol, decision.NewStopLoss)
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -1105,7 +1110,7 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 	log.Printf("  🎯 调整止盈: %s → %.2f", decision.Symbol, decision.NewTakeProfit)
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}
@@ -1239,7 +1244,7 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 	}
 
 	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	marketData, err := market.Get(decision.Symbol, at.timeframes)
 	if err != nil {
 		return err
 	}

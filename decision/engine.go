@@ -104,6 +104,7 @@ type Context struct {
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
 	TakerFeeRate    float64                 `json:"-"` // Taker fee rate (from config, default 0.0004)
 	MakerFeeRate    float64                 `json:"-"` // Maker fee rate (from config, default 0.0002)
+	Timeframes      []string                `json:"-"` // K线时间线配置（从trader配置读取）
 
 	// ⚡ 新增：全局市場情緒數據（VIX 恐慌指數 + 美股狀態）
 	GlobalSentiment *market.MarketSentiment `json:"-"` // 全局風險情緒（免費來源：Yahoo Finance + Alpha Vantage）
@@ -227,7 +228,7 @@ func fetchMarketDataForContext(ctx *Context) error {
 	}
 
 	for symbol := range symbolSet {
-		data, err := market.Get(symbol)
+		data, err := market.Get(symbol, ctx.Timeframes)
 		if err != nil {
 			// 单个币种失败不影响整体，只记录错误
 			continue
