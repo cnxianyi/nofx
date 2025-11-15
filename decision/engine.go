@@ -364,7 +364,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("⚠️ **重要提醒：计算 position_size_usd 的正确方法**\n\n")
 	sb.WriteString(fmt.Sprintf("- 当前账户净值：**%.2f USDT**\n", accountEquity))
 	sb.WriteString(fmt.Sprintf("- 山寨币开仓范围：**%.0f - %.0f USDT** (净值的 2-3 倍)\n", accountEquity*2, accountEquity*3))
-	sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 6-8 倍)\n", accountEquity*6, accountEquity*8))
+	sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 3-5 倍)\n", accountEquity*3, accountEquity*5))
 	sb.WriteString("- ❌ **不要使用市场数据中的任何数字**（如 Open Interest 合约数、Volume、价格等）作为 position_size_usd\n")
 	sb.WriteString("- ✅ **position_size_usd 必须根据账户净值和上述范围计算**\n\n")
 
