@@ -1079,35 +1079,21 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	positionSide := strings.ToUpper(side)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
 
-	// ⚡ 智能验证新止损价格合理性（考虑价格波动容差）
+	// ⚡ 严格验证新止损价格合理性（防止 "Order would immediately trigger" 错误）
 	priceGap := 0.0
 	if positionSide == "LONG" {
 		priceGap = decision.NewStopLoss - marketData.CurrentPrice
 		if priceGap > 0 {
-			// 多单止损价高于当前价 - 可能是延迟导致的异常
-			priceGapPct := (priceGap / marketData.CurrentPrice) * 100
-			if priceGapPct > 0.5 {
-				// 差距超过 0.5%，明显异常
-				return fmt.Errorf("多单止损价异常偏高 (当前: %.2f, 新止损: %.2f, 差距: %.2f%%)",
-					marketData.CurrentPrice, decision.NewStopLoss, priceGapPct)
-			}
-			// 差距 <= 0.5%，可能是价格波动 + AI 延迟，允许通过但警告
-			log.Printf("  ⚠️  止损价 %.2f 略高于市价 %.2f (差距 %.2f%%)，可能是价格快速波动导致",
-				decision.NewStopLoss, marketData.CurrentPrice, priceGapPct)
+			// ❌ 多单止损价高于当前价 - 会立即触发，交易所会拒绝
+			return fmt.Errorf("多单止损必须低于当前价格 (当前: %.2f, 止损: %.2f)",
+				marketData.CurrentPrice, decision.NewStopLoss)
 		}
 	} else {
 		priceGap = marketData.CurrentPrice - decision.NewStopLoss
 		if priceGap > 0 {
-			// 空单止损价低于当前价 - 可能是延迟导致的异常
-			priceGapPct := (priceGap / marketData.CurrentPrice) * 100
-			if priceGapPct > 0.5 {
-				// 差距超过 0.5%，明显异常
-				return fmt.Errorf("空单止损价异常偏低 (当前: %.2f, 新止损: %.2f, 差距: %.2f%%)",
-					marketData.CurrentPrice, decision.NewStopLoss, priceGapPct)
-			}
-			// 差距 <= 0.5%，可能是价格波动 + AI 延迟，允许通过但警告
-			log.Printf("  ⚠️  止损价 %.2f 略低于市价 %.2f (差距 %.2f%%)，可能是价格快速波动导致",
-				decision.NewStopLoss, marketData.CurrentPrice, priceGapPct)
+			// ❌ 空单止损价低于当前价 - 会立即触发，交易所会拒绝
+			return fmt.Errorf("空单止损必须高于当前价格 (当前: %.2f, 止损: %.2f)",
+				marketData.CurrentPrice, decision.NewStopLoss)
 		}
 	}
 
@@ -1208,27 +1194,21 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 	positionSide := strings.ToUpper(side)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
 
-	// ⚡ 智能验证新止盈价格合理性（严格验证，防止 "Order would immediately trigger" 错误）
+	// ⚡ 严格验证新止盈价格合理性（防止 "Order would immediately trigger" 错误）
 	priceGap := 0.0
 	if positionSide == "LONG" {
 		priceGap = marketData.CurrentPrice - decision.NewTakeProfit
 		if priceGap > 0 {
 			// ❌ 多单止盈价低于当前价 - 会立即触发，交易所会拒绝
-			// 修复 Issue: code=-2021, msg=Order would immediately trigger
-			priceGapPct := (priceGap / marketData.CurrentPrice) * 100
-			return fmt.Errorf("多单止盈价不合理：止盈价 %.2f 低于当前价 %.2f (差距 %.2f%%)，会立即触发。"+
-				"建议：AI 应设置高于当前价的止盈价，或选择 hold 等待价格上涨",
-				decision.NewTakeProfit, marketData.CurrentPrice, priceGapPct)
+			return fmt.Errorf("多单止盈必须高于当前价格 (当前: %.2f, 止盈: %.2f)",
+				marketData.CurrentPrice, decision.NewTakeProfit)
 		}
 	} else {
 		priceGap = decision.NewTakeProfit - marketData.CurrentPrice
 		if priceGap > 0 {
 			// ❌ 空单止盈价高于当前价 - 会立即触发，交易所会拒绝
-			// 修复 Issue: code=-2021, msg=Order would immediately trigger
-			priceGapPct := (priceGap / marketData.CurrentPrice) * 100
-			return fmt.Errorf("空单止盈价不合理：止盈价 %.2f 高于当前价 %.2f (差距 %.2f%%)，会立即触发。"+
-				"建议：AI 应设置低于当前价的止盈价，或选择 hold 等待价格下跌",
-				decision.NewTakeProfit, marketData.CurrentPrice, priceGapPct)
+			return fmt.Errorf("空单止盈必须低于当前价格 (当前: %.2f, 止盈: %.2f)",
+				marketData.CurrentPrice, decision.NewTakeProfit)
 		}
 	}
 

@@ -492,7 +492,19 @@ func (s *AutoTraderTestSuite) TestExecuteOpenPosition() {
 				s.mockTrader.positions = []map[string]interface{}{}
 			}
 
-			decision := &decision.Decision{Action: tt.action, Symbol: "BTCUSDT", PositionSizeUSD: 1000.0, Leverage: 10}
+			decision := &decision.Decision{
+				Action:          tt.action,
+				Symbol:          "BTCUSDT",
+				PositionSizeUSD: 1000.0,
+				Leverage:        10,
+				StopLoss:        48000.0, // 多单：< 50000，空单：需要覆盖
+				TakeProfit:      52000.0, // 多单：> 50000，空单：需要覆盖
+			}
+			// 空单需要调整止损/止盈方向
+			if tt.action == "open_short" {
+				decision.StopLoss = 52000.0  // 空单止损 > 当前价
+				decision.TakeProfit = 48000.0 // 空单止盈 < 当前价
+			}
 			actionRecord := &logger.DecisionAction{Action: tt.action, Symbol: "BTCUSDT"}
 
 			err := tt.executeFn(decision, actionRecord)
@@ -796,6 +808,8 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 			Symbol:          "BTCUSDT",
 			PositionSizeUSD: 1000.0,
 			Leverage:        10,
+			StopLoss:        48000.0, // 多单：< 当前价 50000
+			TakeProfit:      52000.0, // 多单：> 当前价 50000
 		}
 		actionRecord := &logger.DecisionAction{}
 
