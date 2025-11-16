@@ -459,7 +459,7 @@ func (at *AutoTrader) RunCycle(webhookPrompt string) error {
 	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
 	decision, err := decision.GetFullDecisionWithCustomPrompt(
 		ctx,
-		at.mcpClient.(*mcp.Client), // 修正类型断言
+		at.mcpClient,
 		at.customPrompt,
 		at.overrideBasePrompt,
 		at.systemPromptTemplate,

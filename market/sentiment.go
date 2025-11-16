@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -105,10 +107,57 @@ func AnalyzeSentiment(longShortRatio, topTraderRatio float64) string {
 // FetchVIX 獲取 VIX 恐慌指數
 // 使用 Yahoo Finance API（免費，但有限流）
 func FetchVIX() (float64, error) {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		vix, err := fetchVIXOnce()
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("✅ VIX 重试成功 (第 %d 次尝试)", attempt)
+			}
+			return vix, nil
+		}
+
+		lastErr = err
+		errStr := err.Error()
+
+		// 429 错误（限流）可以重试
+		if strings.Contains(errStr, "HTTP 429") {
+			if attempt < maxRetries {
+				backoff := time.Duration(attempt) * 5 * time.Second // 5s, 10s, 15s
+				log.Printf("⚠️  VIX 获取被限流 (尝试 %d/%d)，%v 后重试...", attempt, maxRetries, backoff)
+				time.Sleep(backoff)
+				continue
+			}
+		}
+
+		// 其他错误不重试
+		return 0, err
+	}
+
+	return 0, fmt.Errorf("VIX 获取失败（已重试 %d 次）: %w", maxRetries, lastErr)
+}
+
+// fetchVIXOnce 单次尝试获取 VIX
+func fetchVIXOnce() (float64, error) {
 	// Yahoo Finance API（非官方但穩定）
 	url := "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1m&range=1d"
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// 添加 User-Agent 请求头（可能有助于避免限流）
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch VIX: %w", err)
 	}
@@ -116,7 +165,25 @@ func FetchVIX() (float64, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// 检查 HTTP 状态码
+	if resp.StatusCode != http.StatusOK {
+		bodyStr := string(body)
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..."
+		}
+		return 0, fmt.Errorf("HTTP %d: %s", resp.StatusCode, bodyStr)
+	}
+
+	// 检查响应是否为 JSON（如果不是，记录实际内容）
+	if len(body) > 0 && (body[0] != '{' && body[0] != '[') {
+		bodyStr := string(body)
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..."
+		}
+		return 0, fmt.Errorf("invalid response format (not JSON): %s", bodyStr)
 	}
 
 	var data struct {
@@ -130,14 +197,23 @@ func FetchVIX() (float64, error) {
 	}
 
 	if err := json.Unmarshal(body, &data); err != nil {
-		return 0, err
+		bodyStr := string(body)
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..."
+		}
+		return 0, fmt.Errorf("failed to parse JSON: %w (response: %s)", err, bodyStr)
 	}
 
 	if len(data.Chart.Result) == 0 {
-		return 0, fmt.Errorf("no VIX data returned")
+		return 0, fmt.Errorf("no VIX data returned in response")
 	}
 
-	return data.Chart.Result[0].Meta.RegularMarketPrice, nil
+	vix := data.Chart.Result[0].Meta.RegularMarketPrice
+	if vix <= 0 {
+		return 0, fmt.Errorf("invalid VIX value: %.2f", vix)
+	}
+
+	return vix, nil
 }
 
 // AnalyzeVIX 分析 VIX 指數並給出建議
@@ -246,17 +322,29 @@ func FetchMarketSentiment(alphaVantageKey string) (*MarketSentiment, error) {
 
 	// 1. 獲取 VIX（免費）
 	vix, err := FetchVIX()
-	if err == nil {
+	if err != nil {
+		log.Printf("⚠️  VIX 获取失败: %v", err)
+	} else {
 		sentiment.VIX = vix
 		sentiment.FearLevel, sentiment.Recommendation = AnalyzeVIX(vix)
+		log.Printf("✅ VIX 获取成功: %.2f (%s, %s)", vix, sentiment.FearLevel, sentiment.Recommendation)
 	}
 
 	// 2. 獲取美股狀態（可選，需要 API Key）
 	if alphaVantageKey != "" {
 		usMarket, err := FetchSPXStatus(alphaVantageKey)
-		if err == nil {
+		if err != nil {
+			log.Printf("⚠️  美股状态获取失败: %v", err)
+		} else {
 			sentiment.USMarket = usMarket
+			if usMarket.IsOpen {
+				log.Printf("✅ 美股状态获取成功: %s (S&P 500: %+.2f%%)", usMarket.SPXTrend, usMarket.SPXChange1h)
+			} else {
+				log.Printf("ℹ️  美股休市中")
+			}
 		}
+	} else {
+		log.Printf("ℹ️  未配置 ALPHA_VANTAGE_API_KEY，跳过美股状态获取")
 	}
 
 	return sentiment, nil

@@ -146,27 +146,28 @@ type FullDecision struct {
 }
 
 // GetFullDecision 获取AI的完整交易决策（批量分析所有币种和持仓）
-func GetFullDecision(ctx *Context, mcpClient *mcp.Client) (*FullDecision, error) {
+func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error) {
 	return GetFullDecisionWithCustomPrompt(ctx, mcpClient, "", false, "", "")
 }
 
 // GetFullDecisionWithCustomPrompt 获取AI的完整交易决策（支持自定义prompt和模板选择）
-func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient *mcp.Client, customPrompt string, overrideBase bool, templateName string, webhookPrompt string) (*FullDecision, error) {
+func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, customPrompt string, overrideBase bool, templateName string, webhookPrompt string) (*FullDecision, error) {
 	// 1. 为所有币种获取市场数据
 	fetchStart := time.Now()
 	if err := fetchMarketDataForContext(ctx); err != nil {
 		return nil, fmt.Errorf("获取市场数据失败: %w", err)
 	}
 	fetchDuration := time.Since(fetchStart).Seconds()
-	log.Printf("⏱️  市場數據獲取耗時: %.2fs（%d 個幣種）", fetchDuration, len(ctx.MarketDataMap))
+	log.Printf("⏱️  市场数据获取完成: %.2fs（%d 个币种）", fetchDuration, len(ctx.MarketDataMap))
 
 	// 1.5. ⚡ 獲取全局市場情緒（VIX + 美股，免費來源）
 	alphaVantageKey := os.Getenv("ALPHA_VANTAGE_API_KEY") // 可選，用於美股數據（免費 500 calls/day）
 	sentiment, err := market.FetchMarketSentiment(alphaVantageKey)
 	if err != nil {
 		// 非關鍵數據，失敗不阻塞主流程
-		log.Printf("⚠️  獲取全局市場情緒失敗（不影響交易）: %v", err)
+		log.Printf("⚠️  全局市场情绪获取失败（不影響交易）: %v", err)
 	} else {
+		log.Printf("⚠️  全局市场情绪获取完成: %v", sentiment)
 		ctx.GlobalSentiment = sentiment
 	}
 
@@ -413,7 +414,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
 	sb.WriteString("2. 最多持仓: 2个币种（质量>数量）\n")
 	sb.WriteString(fmt.Sprintf("3. 单币仓位: 山寨%.0f-%.0f U | BTC/ETH %.0f-%.0f U\n",
-		accountEquity*2.5, accountEquity*5, accountEquity*5, accountEquity*10))
+		accountEquity*1, accountEquity*2, accountEquity*3, accountEquity*6))
 	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
 	sb.WriteString("5. 保证金: 总使用率 ≤ 70%\n")
 
@@ -467,6 +468,14 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
 	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
 	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+	sb.WriteString("## ⚠️ 盈利保持\n\n")
+	sb.WriteString("**盈利后更新止盈线到成本线与当前价值的中间**\n\n")
+	sb.WriteString("计算方式：新止盈价格 = (开仓价格 + 当前价格) / 2\n\n")
+	sb.WriteString("示例：\n")
+	sb.WriteString("- 开仓价格：100000 USDT\n")
+	sb.WriteString("- 当前价格：101000 USDT\n")
+	sb.WriteString("- 新止盈价格 = (100000 + 101000) / 2 = 100500 USDT\n\n")
+	sb.WriteString("**规则**：当持仓盈利时，使用 `update_take_profit` 动作将止盈价格更新为成本价与当前价的中间值，以锁定部分利润。\n\n")
 	sb.WriteString("## 🛡️ 未成交挂单提醒\n\n")
 	sb.WriteString("在「当前持仓」部分，你会看到每个持仓的挂单状态：\n\n")
 	sb.WriteString("- 🛡️ **止损单**: 表示该持仓已有止损保护\n")
@@ -542,7 +551,17 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 
 	// webhook prompt
 	if webhookPrompt != "" {
-		sb.WriteString(fmt.Sprintf("## 🔔(很重要) 触发Webhook，请参考Webhook内容做出决策: \n\n%s\n\n", webhookPrompt))
+		sb.WriteString("## webhook触发\n\n")
+		sb.WriteString("**如果用户的webhook触发了该次决策，那么在进行原有判断的情况下，着重考虑用户的webhook触发结果。**\n\n")
+		if strings.Contains(webhookPrompt, "Bullish Rejection") {
+			sb.WriteString("- 如果触发的是 Bullish Rejection。那么计算该币种多单评分，如果评分超过70即可开单\n")
+		}
+		if strings.Contains(webhookPrompt, "Bearish Rejection") {
+			sb.WriteString("- 如果触发的是 Bearish Rejection。那么计算该币种空单评分，如果评分超过70即可开单\n")
+		}
+		sb.WriteString("webhook内容: \n\n")
+		sb.WriteString(webhookPrompt)
+		sb.WriteString("\n\n\n")
 	}
 
 	// 持仓（完整市场数据）
