@@ -821,39 +821,104 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	return ctx, nil
 }
 
-func formatDecision(decision *decision.Decision) string {
-	return fmt.Sprintf("币种：%s\n持仓：%f\n杠杆：%d\n止损：%f\n止盈：%f", decision.Symbol, decision.PositionSizeUSD, decision.Leverage, decision.StopLoss, decision.TakeProfit)
+func formatDecision(decision *decision.Decision, actionRecord *logger.DecisionAction) string {
+	var sb strings.Builder
+
+	// 币种和操作类型
+	sb.WriteString(fmt.Sprintf("**币种**: %s\n", decision.Symbol))
+	sb.WriteString(fmt.Sprintf("**操作**: %s\n\n", decision.Action))
+
+	// 根据操作类型展示不同信息
+	switch decision.Action {
+	case "open_long", "open_short":
+		if decision.PositionSizeUSD > 0 {
+			sb.WriteString(fmt.Sprintf("💰 **仓位**: %.2f USDT\n", decision.PositionSizeUSD))
+		}
+		if decision.Leverage > 0 {
+			sb.WriteString(fmt.Sprintf("⚡ **杠杆**: %dx\n", decision.Leverage))
+		}
+		if decision.StopLoss > 0 {
+			sb.WriteString(fmt.Sprintf("🛡️ **止损**: %.2f\n", decision.StopLoss))
+		}
+		if decision.TakeProfit > 0 {
+			sb.WriteString(fmt.Sprintf("🎯 **止盈**: %.2f\n", decision.TakeProfit))
+		}
+		if decision.Confidence > 0 {
+			sb.WriteString(fmt.Sprintf("📊 **信心度**: %d%%\n", decision.Confidence))
+		}
+		if decision.RiskUSD > 0 {
+			sb.WriteString(fmt.Sprintf("⚠️ **风险**: %.2f USDT\n", decision.RiskUSD))
+		}
+
+	case "update_stop_loss":
+		if decision.NewStopLoss > 0 {
+			sb.WriteString(fmt.Sprintf("🛡️ **新止损**: %.2f\n", decision.NewStopLoss))
+		}
+
+	case "update_take_profit":
+		if decision.NewTakeProfit > 0 {
+			sb.WriteString(fmt.Sprintf("🎯 **新止盈**: %.2f\n", decision.NewTakeProfit))
+		}
+
+	case "partial_close":
+		if decision.ClosePercentage > 0 {
+			sb.WriteString(fmt.Sprintf("📉 **平仓比例**: %.1f%%\n", decision.ClosePercentage))
+		}
+	}
+
+	// 执行结果
+	if actionRecord != nil {
+		sb.WriteString("\n**执行信息**:\n")
+		if actionRecord.Price > 0 {
+			sb.WriteString(fmt.Sprintf("💵 **价格**: %.2f\n", actionRecord.Price))
+		}
+		if actionRecord.Quantity > 0 {
+			sb.WriteString(fmt.Sprintf("📦 **数量**: %.4f\n", actionRecord.Quantity))
+		}
+		if actionRecord.OrderID > 0 {
+			sb.WriteString(fmt.Sprintf("🆔 **订单ID**: %d\n", actionRecord.OrderID))
+		}
+		if actionRecord.Success {
+			sb.WriteString("✅ **状态**: 成功\n")
+		} else {
+			sb.WriteString("❌ **状态**: 失败\n")
+			if actionRecord.Error != "" {
+				sb.WriteString(fmt.Sprintf("⚠️ **错误**: %s\n", actionRecord.Error))
+			}
+		}
+	}
+
+	// 决策原因
+	if decision.Reasoning != "" {
+		sb.WriteString(fmt.Sprintf("\n💭 **决策原因**: %s", decision.Reasoning))
+	}
+
+	return sb.String()
 }
 
 // executeDecisionWithRecord 执行AI决策并记录详细信息
 func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
+	message := formatDecision(decision, actionRecord)
 	switch decision.Action {
 	case "open_long":
-		message := formatDecision(decision)
 		notify.SendNotify("开多仓", message)
 		return at.executeOpenLongWithRecord(decision, actionRecord)
 	case "open_short":
-		message := formatDecision(decision)
 		notify.SendNotify("开空仓", message)
 		return at.executeOpenShortWithRecord(decision, actionRecord)
 	case "close_long":
-		message := formatDecision(decision)
 		notify.SendNotify("平多仓", message)
 		return at.executeCloseLongWithRecord(decision, actionRecord)
 	case "close_short":
-		message := formatDecision(decision)
 		notify.SendNotify("平空仓", message)
 		return at.executeCloseShortWithRecord(decision, actionRecord)
 	case "update_stop_loss":
-		message := formatDecision(decision)
 		notify.SendNotify("更新止损", message)
 		return at.executeUpdateStopLossWithRecord(decision, actionRecord)
 	case "update_take_profit":
-		message := formatDecision(decision)
 		notify.SendNotify("更新止盈", message)
 		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
 	case "partial_close":
-		message := formatDecision(decision)
 		notify.SendNotify("部分平仓", message)
 		return at.executePartialCloseWithRecord(decision, actionRecord)
 	case "hold", "wait":
