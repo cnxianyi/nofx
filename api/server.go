@@ -15,13 +15,16 @@ import (
 	"nofx/hook"
 	"nofx/logger"
 	"nofx/manager"
+	"nofx/middleware"
 	"nofx/trader"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"golang.org/x/time/rate"
 )
 
 // Server HTTP API服务器
@@ -41,11 +44,105 @@ func NewServer(traderManager *manager.TraderManager, database *config.Database, 
 
 	router := gin.Default()
 
-	// 启用CORS
-	router.Use(corsMiddleware())
+	// 配置允许的 CORS 来源
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://localhost:5173",
+	}
+	if frontendURL := os.Getenv("FRONTEND_URL"); frontendURL != "" {
+		allowedOrigins = append(allowedOrigins, frontendURL)
+	}
+	if corsOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); corsOrigins != "" {
+		additionalOrigins := strings.Split(corsOrigins, ",")
+		for _, origin := range additionalOrigins {
+			origin = strings.TrimSpace(origin)
+			if origin != "" {
+				allowedOrigins = append(allowedOrigins, origin)
+			}
+		}
+	}
+
+	// 生产环境 CORS 配置检查
+	isDevelopment := os.Getenv("ENVIRONMENT") != "production"
+	corsConfigured := os.Getenv("CORS_ALLOWED_ORIGINS") != "" || os.Getenv("FRONTEND_URL") != ""
+	disableCORS := strings.EqualFold(os.Getenv("DISABLE_CORS"), "true")
+
+	if !isDevelopment && !corsConfigured && !disableCORS {
+		log.Println("")
+		log.Println("╔═══════════════════════════════════════════════════════════════════╗")
+		log.Println("║  ⚠️  警告：生產模式下未配置 CORS！                                ║")
+		log.Println("╟───────────────────────────────────────────────────────────────────╢")
+		log.Println("║  當前狀態：                                                        ║")
+		log.Println("║    • ENVIRONMENT=production（生產模式）                           ║")
+		log.Println("║    • CORS_ALLOWED_ORIGINS 未設置                                  ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  預期行為：                                                        ║")
+		log.Println("║    ✅ localhost:3000, localhost:5173 可正常訪問                   ║")
+		log.Println("║    ❌ 其他所有來源將被 403 拒絕（包括域名、公網 IP）              ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  解決方案（選擇其一）：                                            ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  1️⃣  配置允許的前端域名（推薦用於生產環境）：                     ║")
+		log.Println("║      在 .env 中添加：                                             ║")
+		log.Println("║      CORS_ALLOWED_ORIGINS=https://yourdomain.com                 ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  2️⃣  切換回開發模式（不設置 ENVIRONMENT 或設為其他值）：           ║")
+		log.Println("║      移除或註釋 .env 中的：                                       ║")
+		log.Println("║      # ENVIRONMENT=production                                    ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  3️⃣  完全禁用 CORS（僅限安全的內網環境）：                        ║")
+		log.Println("║      在 .env 中添加：                                             ║")
+		log.Println("║      DISABLE_CORS=true                                           ║")
+		log.Println("║                                                                   ║")
+		log.Println("║  修改後需重啟容器：                                                ║")
+		log.Println("║      docker-compose restart                                      ║")
+		log.Println("╚═══════════════════════════════════════════════════════════════════╝")
+		log.Println("")
+	} else if isDevelopment {
+		log.Println("🔧 [CORS] 開發模式啟動：自動允許 localhost、.local 域名和私有 IP")
+		if len(allowedOrigins) > 2 {
+			log.Printf("    已配置額外白名單：%v", allowedOrigins[2:])
+		}
+	} else if disableCORS {
+		log.Println("⚠️  [CORS] CORS 檢查已完全禁用 (DISABLE_CORS=true)")
+	} else {
+		log.Println("🔒 [CORS] 生產模式啟動：嚴格執行白名單")
+		log.Printf("    允許的來源：%v", allowedOrigins)
+	}
+
+	// 启用 CORS（白名单模式）
+	router.Use(corsMiddleware(allowedOrigins))
+
+	// 启用全局速率限制 (每秒 10 个请求)
+	globalLimiter := middleware.NewIPRateLimiter(rate.Limit(10), 10)
+	router.Use(middleware.RateLimitMiddleware(globalLimiter))
+
+	// CSRF 保护（Double Submit Cookie 模式）- 可通过环境变量控制
+	// 开发阶段默认关闭以避免频繁 403 错误，生产环境建议启用
+	enableCSRF := os.Getenv("ENABLE_CSRF")
+	if enableCSRF == "true" {
+		log.Println("✅ [CSRF] CSRF 保护已启用")
+		csrfConfig := middleware.DefaultCSRFConfig()
+		// 生产环境应启用 HTTPS-only Cookie
+		if os.Getenv("ENVIRONMENT") == "production" {
+			csrfConfig.CookieSecure = true
+		}
+		router.Use(middleware.CSRFMiddleware(csrfConfig))
+	} else {
+		log.Println("⚠️  [CSRF] CSRF 保护已禁用（开发模式）")
+		log.Println("    提示：生产环境请设置 ENABLE_CSRF=true")
+	}
+
+	// 控制是否允許客戶端解密 API（預設關閉）
+	enableClientDecrypt := strings.EqualFold(os.Getenv("ENABLE_CLIENT_DECRYPT_API"), "true")
+	if enableClientDecrypt {
+		log.Println("🔐 [Crypto] ENABLE_CLIENT_DECRYPT_API=true，/api/crypto/decrypt 需要 JWT 且會驗證 AAD")
+	} else {
+		log.Println("🔐 [Crypto] 客戶端解密 API 已禁用（ENABLE_CLIENT_DECRYPT_API未開啟）")
+	}
 
 	// 创建加密处理器
-	cryptoHandler := NewCryptoHandler(cryptoService)
+	cryptoHandler := NewCryptoHandler(cryptoService, enableClientDecrypt)
 
 	s := &Server{
 		router:        router,
@@ -61,13 +158,84 @@ func NewServer(traderManager *manager.TraderManager, database *config.Database, 
 	return s
 }
 
-// corsMiddleware CORS中间件
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+// corsMiddleware CORS中间件（智能模式：开发环境自动允许私有网络）
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	// 检查是否完全禁用 CORS（用于内网环境或开发环境）
+	disableCORS := strings.EqualFold(os.Getenv("DISABLE_CORS"), "true")
 
+	// 检测是否为开发环境（默认为开发环境）
+	isDevelopment := os.Getenv("ENVIRONMENT") != "production"
+
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+
+		// 如果禁用了 CORS，允许所有请求
+		if disableCORS {
+			if origin != "" {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			}
+			if c.Request.Method == "OPTIONS" {
+				c.AbortWithStatus(http.StatusOK)
+				return
+			}
+			c.Next()
+			return
+		}
+
+		// 正常 CORS 检查流程
+		allowed := false
+
+		// 1. 检查白名单
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				allowed = true
+				break
+			}
+		}
+
+		// 2. 开发模式：检查是否为私有网络来源
+		if !allowed && isDevelopment && origin != "" {
+			if isPrivateNetworkOrigin(origin) {
+				allowed = true
+				log.Printf("🔓 [CORS] 开发模式自动允许: %s (私有网络/localhost/.local)", origin)
+			}
+		}
+
+		// 3. 设置 CORS 响应头
+		if allowed {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+		} else if origin != "" {
+			// 开发模式：只记录警告，但仍然允许请求（避免阻断开发）
+			if isDevelopment {
+				log.Printf("⚠️  [CORS] 开发模式警告：未识别的来源 %s", origin)
+				log.Printf("    提示：如需在生产环境使用，请添加到 .env: CORS_ALLOWED_ORIGINS=%s", origin)
+				// 开发模式下仍然设置 CORS 头，避免阻断
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			} else {
+				// 生产模式：严格拒绝
+				log.Printf("🚫 [CORS] 生产模式拒绝来源: %s", origin)
+				log.Printf("    配置方法：在 .env 添加 CORS_ALLOWED_ORIGINS=%s", origin)
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error":   "Origin not allowed",
+					"origin":  origin,
+					"help":    "請在 .env 文件中添加此來源到 CORS_ALLOWED_ORIGINS",
+					"example": fmt.Sprintf("CORS_ALLOWED_ORIGINS=%s", origin),
+					"docs":    "重啟容器後生效：docker-compose restart",
+				})
+				return
+			}
+		}
+
+		// 处理 OPTIONS 预检请求
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusOK)
 			return
@@ -75,6 +243,63 @@ func corsMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// isPrivateNetworkOrigin 检查是否为私有网络来源
+// 支持以下类型：
+// - localhost (localhost, 127.0.0.1, ::1)
+// - .local 域名 (mDNS/Bonjour，如 myserver.local)
+// - RFC 1918 私有 IP：10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+func isPrivateNetworkOrigin(origin string) bool {
+	// 解析 origin URL (格式: http://192.168.1.100:3000 或 http://myserver.local:3000)
+	parts := strings.Split(origin, "://")
+	if len(parts) != 2 {
+		return false
+	}
+
+	hostPort := parts[1]
+	host := strings.Split(hostPort, ":")[0]
+
+	// 1. 检查 localhost 变体
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
+	}
+
+	// 2. 检查 .local 域名 (mDNS)
+	if strings.HasSuffix(host, ".local") {
+		return true
+	}
+
+	// 3. 尝试解析为 IP 地址
+	ip := net.ParseIP(host)
+	if ip == nil {
+		// 不是 IP 地址也不是已知的本地域名，可能是内网域名
+		// 为了安全，这里返回 false，让用户手动添加到白名单
+		return false
+	}
+
+	// 4. 检查是否为 loopback IP (127.0.0.0/8)
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// 5. 检查 RFC 1918 私有 IP 地址
+	privateIPBlocks := []*net.IPNet{
+		// 10.0.0.0/8
+		{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(8, 32)},
+		// 172.16.0.0/12
+		{IP: net.ParseIP("172.16.0.0"), Mask: net.CIDRMask(12, 32)},
+		// 192.168.0.0/16
+		{IP: net.ParseIP("192.168.0.0"), Mask: net.CIDRMask(16, 32)},
+	}
+
+	for _, block := range privateIPBlocks {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // setupRoutes 设置路由
@@ -96,7 +321,9 @@ func (s *Server) setupRoutes() {
 
 		// 加密相关接口（无需认证）
 		api.GET("/crypto/public-key", s.cryptoHandler.HandleGetPublicKey)
-		api.POST("/crypto/decrypt", s.cryptoHandler.HandleDecryptSensitiveData)
+
+		// CSRF Token 获取（无需认证）
+		api.GET("/csrf-token", s.handleGetCSRFToken)
 
 		// 系统提示词模板管理（无需认证）
 		api.GET("/prompt-templates", s.handleGetPromptTemplates)
@@ -110,11 +337,15 @@ func (s *Server) setupRoutes() {
 		api.POST("/equity-history-batch", s.handleEquityHistoryBatch)
 		api.GET("/traders/:id/public-config", s.handleGetPublicTraderConfig)
 
-		// 认证相关路由（无需认证）
-		api.POST("/register", s.handleRegister)
-		api.POST("/login", s.handleLogin)
-		api.POST("/verify-otp", s.handleVerifyOTP)
-		api.POST("/complete-registration", s.handleCompleteRegistration)
+		// 认证相关路由（应用严格速率限制，防止暴力破解）
+		authGroup := api.Group("/", middleware.AuthRateLimitMiddleware())
+		{
+			authGroup.POST("/register", s.handleRegister)
+			authGroup.POST("/login", s.handleLogin)
+			authGroup.POST("/verify-otp", s.handleVerifyOTP)
+			authGroup.POST("/complete-registration", s.handleCompleteRegistration)
+			authGroup.POST("/refresh-token", s.handleRefreshToken)
+		}
 
 		// webhook
 		api.POST("/webhook", s.handleWebhook)
@@ -124,6 +355,11 @@ func (s *Server) setupRoutes() {
 		{
 			// 注销（加入黑名单）
 			protected.POST("/logout", s.handleLogout)
+
+			// 僅在顯式啟用時開放解密端點（需要JWT身份）
+			if s.cryptoHandler.AllowDecryptEndpoint() {
+				protected.POST("/crypto/decrypt", s.cryptoHandler.HandleDecryptSensitiveData)
+			}
 
 			// 服务器IP查询（需要认证，用于白名单配置）
 			protected.GET("/server-ip", s.handleGetServerIP)
@@ -150,6 +386,11 @@ func (s *Server) setupRoutes() {
 			protected.GET("/user/signal-sources", s.handleGetUserSignalSource)
 			protected.POST("/user/signal-sources", s.handleSaveUserSignalSource)
 
+			// 提示词模板管理（需要认证）
+			protected.POST("/prompt-templates", s.handleCreatePromptTemplate)
+			protected.PUT("/prompt-templates/:name", s.handleUpdatePromptTemplate)
+			protected.DELETE("/prompt-templates/:name", s.handleDeletePromptTemplate)
+			protected.POST("/prompt-templates/reload", s.handleReloadPromptTemplates)
 			// 指定trader的数据（使用query参数 ?trader_id=xxx）
 			protected.GET("/status", s.handleStatus)
 			protected.GET("/account", s.handleAccount)
@@ -167,6 +408,19 @@ func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
 		"time":   c.Request.Context().Value("time"),
+	})
+}
+
+// handleGetCSRFToken 获取 CSRF Token
+// 前端调用此接口获取 CSRF Token，用于后续 POST/PUT/DELETE 请求
+func (s *Server) handleGetCSRFToken(c *gin.Context) {
+	csrfConfig := middleware.DefaultCSRFConfig()
+	token := middleware.GetCSRFToken(c, csrfConfig)
+
+	c.JSON(http.StatusOK, gin.H{
+		"csrf_token":  token,
+		"header_name": csrfConfig.HeaderName,
+		"note":        "Please include this token in the X-CSRF-Token header for POST/PUT/DELETE requests",
 	})
 }
 
@@ -567,8 +821,9 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		}
 	}
 
-	// 生成交易员ID
-	traderID := fmt.Sprintf("%s_%s_%d", req.ExchangeID, req.AIModelID, time.Now().Unix())
+	// 生成交易员ID (使用 UUID 确保唯一性，解决 Issue #893)
+	// 保留前缀以便调试和日志追踪
+	traderID := fmt.Sprintf("%s_%s_%s", req.ExchangeID, req.AIModelID, uuid.New().String())
 
 	// 设置默认值
 	isCrossMargin := true // 默认为全仓模式
@@ -608,8 +863,10 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 
 	// 设置扫描间隔默认值
 	scanIntervalMinutes := req.ScanIntervalMinutes
-	if scanIntervalMinutes < 3 {
-		scanIntervalMinutes = 3 // 默认3分钟，且不允许小于3
+	if scanIntervalMinutes <= 0 {
+		scanIntervalMinutes = 2 // 默认2分钟
+	} else if scanIntervalMinutes < 1 {
+		scanIntervalMinutes = 1 // 最低1分钟，不允许小于1分钟
 	}
 
 	// ✅ Fix #787, #807, #790: Respect user-specified initial balance
@@ -719,15 +976,17 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 	log.Printf("✅ [DEBUG] 找到 %d 个 AI 模型配置", len(aiModels))
 
 	var aiModelIntID int
+	var aiModelFound bool
 	for _, model := range aiModels {
 		log.Printf("🔍 [DEBUG] 检查 AI 模型: ID=%d, ModelID=%s (寻找: %s)", model.ID, model.ModelID, req.AIModelID)
 		if model.ModelID == req.AIModelID {
 			aiModelIntID = model.ID
+			aiModelFound = true
 			log.Printf("✅ [DEBUG] 找到匹配的 AI 模型: ID=%d", aiModelIntID)
 			break
 		}
 	}
-	if aiModelIntID == 0 {
+	if !aiModelFound {
 		log.Printf("❌ [DEBUG] 未找到 AI 模型 '%s'，可用的模型：", req.AIModelID)
 		for _, model := range aiModels {
 			log.Printf("   - ModelID=%s", model.ModelID)
@@ -746,15 +1005,17 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 	log.Printf("✅ [DEBUG] 找到 %d 个交易所配置", len(exchanges))
 
 	var exchangeIntID int
+	var exchangeFound bool
 	for _, exchange := range exchanges {
 		log.Printf("🔍 [DEBUG] 检查交易所: ID=%d, ExchangeID=%s (寻找: %s)", exchange.ID, exchange.ExchangeID, req.ExchangeID)
 		if exchange.ExchangeID == req.ExchangeID {
 			exchangeIntID = exchange.ID
+			exchangeFound = true
 			log.Printf("✅ [DEBUG] 找到匹配的交易所: ID=%d", exchangeIntID)
 			break
 		}
 	}
-	if exchangeIntID == 0 {
+	if !exchangeFound {
 		log.Printf("❌ [DEBUG] 未找到交易所 '%s'，可用的交易所：", req.ExchangeID)
 		for _, exchange := range exchanges {
 			log.Printf("   - ExchangeID=%s", exchange.ExchangeID)
@@ -833,6 +1094,8 @@ type UpdateTraderRequest struct {
 	OverrideBasePrompt   bool    `json:"override_base_prompt"`
 	SystemPromptTemplate string  `json:"system_prompt_template"`
 	IsCrossMargin        *bool   `json:"is_cross_margin"`
+	UseCoinPool          *bool   `json:"use_coin_pool"`
+	UseOITop             *bool   `json:"use_oi_top"`
 	TakerFeeRate         float64 `json:"taker_fee_rate"`        // Taker fee rate
 	MakerFeeRate         float64 `json:"maker_fee_rate"`        // Maker fee rate
 	OrderStrategy        string  `json:"order_strategy"`        // Order strategy
@@ -845,6 +1108,12 @@ type UpdateTraderRequest struct {
 func (s *Server) handleUpdateTrader(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
+
+	// 确保用户的交易员已加载到内存中
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
 
 	var req UpdateTraderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -892,14 +1161,25 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	scanIntervalMinutes := req.ScanIntervalMinutes
 	if scanIntervalMinutes <= 0 {
 		scanIntervalMinutes = existingTrader.ScanIntervalMinutes // 保持原值
-	} else if scanIntervalMinutes < 3 {
-		scanIntervalMinutes = 3
+	} else if scanIntervalMinutes < 1 {
+		scanIntervalMinutes = 1 // 最低1分钟，不允许小于1分钟
 	}
 
 	// 设置提示词模板，允许更新
 	systemPromptTemplate := req.SystemPromptTemplate
 	if systemPromptTemplate == "" {
 		systemPromptTemplate = existingTrader.SystemPromptTemplate // 如果请求中没有提供，保持原值
+	}
+
+	// 设置信号源开关
+	useCoinPool := existingTrader.UseCoinPool
+	if req.UseCoinPool != nil {
+		useCoinPool = *req.UseCoinPool
+	}
+
+	useOITop := existingTrader.UseOITop
+	if req.UseOITop != nil {
+		useOITop = *req.UseOITop
 	}
 
 	// 设置费率，允许更新
@@ -987,13 +1267,15 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	}
 
 	var aiModelIntID int
+	var aiModelFound bool
 	for _, model := range aiModels {
 		if model.ModelID == req.AIModelID {
 			aiModelIntID = model.ID
+			aiModelFound = true
 			break
 		}
 	}
-	if aiModelIntID == 0 {
+	if !aiModelFound {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("AI模型 %s 不存在", req.AIModelID)})
 		return
 	}
@@ -1005,13 +1287,15 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	}
 
 	var exchangeIntID int
+	var exchangeFound bool
 	for _, exchange := range exchanges {
 		if exchange.ExchangeID == req.ExchangeID {
 			exchangeIntID = exchange.ID
+			exchangeFound = true
 			break
 		}
 	}
-	if exchangeIntID == 0 {
+	if !exchangeFound {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("交易所 %s 不存在", req.ExchangeID)})
 		return
 	}
@@ -1027,6 +1311,8 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		BTCETHLeverage:       btcEthLeverage,
 		AltcoinLeverage:      altcoinLeverage,
 		TradingSymbols:       req.TradingSymbols,
+		UseCoinPool:          useCoinPool,
+		UseOITop:             useOITop,
 		CustomPrompt:         req.CustomPrompt,
 		OverrideBasePrompt:   req.OverrideBasePrompt,
 		SystemPromptTemplate: systemPromptTemplate,
@@ -1084,14 +1370,20 @@ func (s *Server) handleDeleteTrader(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
 
+	// 确保用户的交易员已加载到内存中
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
+
 	// ✅ 步骤1：先从内存中停止并移除交易员（RemoveTrader会处理停止逻辑和竞赛缓存清除）
-	if err := s.traderManager.RemoveTrader(traderID); err != nil {
+	if removeErr := s.traderManager.RemoveTrader(traderID); removeErr != nil {
 		// 交易员不在内存中也不是错误，可能已经被移除或从未加载
-		log.Printf("⚠️ 从内存中移除交易员时出现警告: %v", err)
+		log.Printf("⚠️ 从内存中移除交易员时出现警告: %v", removeErr)
 	}
 
 	// ✅ 步骤2：最后才从数据库删除
-	err := s.database.DeleteTrader(userID, traderID)
+	err = s.database.DeleteTrader(userID, traderID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("删除交易员失败: %v", err)})
 		return
@@ -1105,6 +1397,12 @@ func (s *Server) handleDeleteTrader(c *gin.Context) {
 func (s *Server) handleStartTrader(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
+
+	// 确保用户的交易员已加载到内存中（修复 404 问题）
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
 
 	// 校验交易员是否属于当前用户
 	traderRecord, _, _, err := s.database.GetTraderConfig(userID, traderID)
@@ -1155,8 +1453,14 @@ func (s *Server) handleStopTrader(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
 
+	// 确保用户的交易员已加载到内存中
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
+
 	// 校验交易员是否属于当前用户
-	_, _, _, err := s.database.GetTraderConfig(userID, traderID)
+	_, _, _, err = s.database.GetTraderConfig(userID, traderID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在或无访问权限"})
 		return
@@ -1193,18 +1497,24 @@ func (s *Server) handleUpdateTraderPrompt(c *gin.Context) {
 	traderID := c.Param("id")
 	userID := c.GetString("user_id")
 
+	// 确保用户的交易员已加载到内存中（修复 404 问题）
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
+
 	var req struct {
 		CustomPrompt       string `json:"custom_prompt"`
 		OverrideBasePrompt bool   `json:"override_base_prompt"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
 		return
 	}
 
 	// 更新数据库
-	err := s.database.UpdateTraderCustomPrompt(userID, traderID, req.CustomPrompt, req.OverrideBasePrompt)
+	err = s.database.UpdateTraderCustomPrompt(userID, traderID, req.CustomPrompt, req.OverrideBasePrompt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("更新自定义prompt失败: %v", err)})
 		return
@@ -1225,6 +1535,12 @@ func (s *Server) handleUpdateTraderPrompt(c *gin.Context) {
 func (s *Server) handleSyncBalance(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
+
+	// 确保用户的交易员已加载到内存中（修复 404 问题）
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
+	}
 
 	log.Printf("🔄 用户 %s 请求同步交易员 %s 的余额", userID, traderID)
 
@@ -1640,6 +1956,21 @@ func (s *Server) handleTraderList(c *gin.Context) {
 			"is_running":             isRunning,
 			"initial_balance":        trader.InitialBalance,
 			"system_prompt_template": trader.SystemPromptTemplate,
+			"scan_interval_minutes":  trader.ScanIntervalMinutes,
+			"btc_eth_leverage":       trader.BTCETHLeverage,
+			"altcoin_leverage":       trader.AltcoinLeverage,
+			"trading_symbols":        trader.TradingSymbols,
+			"custom_prompt":          trader.CustomPrompt,
+			"override_base_prompt":   trader.OverrideBasePrompt,
+			"is_cross_margin":        trader.IsCrossMargin,
+			"use_coin_pool":          trader.UseCoinPool,
+			"use_oi_top":             trader.UseOITop,
+			"taker_fee_rate":         trader.TakerFeeRate,
+			"maker_fee_rate":         trader.MakerFeeRate,
+			"order_strategy":         trader.OrderStrategy,
+			"limit_price_offset":     trader.LimitPriceOffset,
+			"limit_timeout_seconds":  trader.LimitTimeoutSeconds,
+			"timeframes":             trader.Timeframes,
 		})
 	}
 
@@ -1654,6 +1985,12 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 	if traderID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "交易员ID不能为空"})
 		return
+	}
+
+	// 确保用户的交易员已加载到内存中（修复 404 问题）
+	err := s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 加载用户 %s 的交易员失败: %v", userID, err)
 	}
 
 	traderConfig, aiModel, exchange, err := s.database.GetTraderConfig(userID, traderID)
@@ -1695,6 +2032,12 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"use_coin_pool":          traderConfig.UseCoinPool,
 		"use_oi_top":             traderConfig.UseOITop,
 		"is_running":             isRunning,
+		"taker_fee_rate":         traderConfig.TakerFeeRate,
+		"maker_fee_rate":         traderConfig.MakerFeeRate,
+		"order_strategy":         traderConfig.OrderStrategy,
+		"limit_price_offset":     traderConfig.LimitPriceOffset,
+		"limit_timeout_seconds":  traderConfig.LimitTimeoutSeconds,
+		"timeframes":             traderConfig.Timeframes,
 	}
 
 	c.JSON(http.StatusOK, result)
@@ -2244,8 +2587,8 @@ func (s *Server) handleCompleteRegistration(c *gin.Context) {
 		return
 	}
 
-	// 生成JWT token
-	token, err := auth.GenerateJWT(user.ID, user.Email)
+	// 生成 Access/Refresh Token
+	tokenPair, err := auth.GenerateTokenPair(user.ID, user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成token失败"})
 		return
@@ -2258,10 +2601,13 @@ func (s *Server) handleCompleteRegistration(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"token":   token,
-		"user_id": user.ID,
-		"email":   user.Email,
-		"message": "注册完成",
+		"access_token":       tokenPair.AccessToken,
+		"refresh_token":      tokenPair.RefreshToken,
+		"expires_in":         tokenPair.ExpiresIn,
+		"refresh_expires_in": tokenPair.RefreshExpiresIn,
+		"user_id":            user.ID,
+		"email":              user.Email,
+		"message":            "注册完成",
 	})
 }
 
@@ -2334,18 +2680,52 @@ func (s *Server) handleVerifyOTP(c *gin.Context) {
 		return
 	}
 
-	// 生成JWT token
-	token, err := auth.GenerateJWT(user.ID, user.Email)
+	// 生成新的 Token Pair（Access + Refresh）
+	tokenPair, err := auth.GenerateTokenPair(user.ID, user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成token失败"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"token":   token,
-		"user_id": user.ID,
-		"email":   user.Email,
-		"message": "登录成功",
+		"access_token":       tokenPair.AccessToken,
+		"refresh_token":      tokenPair.RefreshToken,
+		"expires_in":         tokenPair.ExpiresIn,
+		"refresh_expires_in": tokenPair.RefreshExpiresIn,
+		"user_id":            user.ID,
+		"email":              user.Email,
+		"message":            "登录成功",
+	})
+}
+
+// handleRefreshToken 刷新访问令牌（使用 Refresh Token 获取新的 Token Pair）
+func (s *Server) handleRefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 refresh_token 参数"})
+		return
+	}
+
+	// 调用 auth.RefreshAccessToken 刷新令牌（自动进行 Token Rotation）
+	tokenPair, err := auth.RefreshAccessToken(req.RefreshToken)
+	if err != nil {
+		log.Printf("❌ [AUTH] Refresh Token 刷新失败: %v", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Refresh Token 无效或已过期"})
+		return
+	}
+
+	log.Printf("✓ [AUTH] Token 刷新成功")
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":       tokenPair.AccessToken,
+		"refresh_token":      tokenPair.RefreshToken,
+		"expires_in":         tokenPair.ExpiresIn,
+		"refresh_expires_in": tokenPair.RefreshExpiresIn,
+		"token_type":         "Bearer",
+		"message":            "Token 刷新成功",
 	})
 }
 
@@ -2783,4 +3163,106 @@ func (s *Server) reloadPromptTemplatesWithLog(templateName string) {
 	} else {
 		log.Printf("✓ 已重新加载系统提示词模板 [当前使用: %s]", templateName)
 	}
+}
+
+// handleCreatePromptTemplate 创建新的提示词模板
+func (s *Server) handleCreatePromptTemplate(c *gin.Context) {
+	var req struct {
+		Name    string `json:"name" binding:"required"`
+		Content string `json:"content" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 检查模板是否已存在
+	if decision.TemplateExists(req.Name) {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("模板已存在: %s", req.Name)})
+		return
+	}
+
+	// 保存模板
+	if err := decision.SavePromptTemplate(req.Name, req.Content); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建模板失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "模板创建成功",
+		"name":    req.Name,
+	})
+}
+
+// handleUpdatePromptTemplate 更新提示词模板
+func (s *Server) handleUpdatePromptTemplate(c *gin.Context) {
+	templateName := c.Param("name")
+
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 检查模板是否存在
+	if !decision.TemplateExists(templateName) {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("模板不存在: %s", templateName)})
+		return
+	}
+
+	// 更新模板
+	if err := decision.SavePromptTemplate(templateName, req.Content); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("更新模板失败: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "模板更新成功",
+		"name":    templateName,
+	})
+}
+
+// handleDeletePromptTemplate 删除提示词模板
+func (s *Server) handleDeletePromptTemplate(c *gin.Context) {
+	templateName := c.Param("name")
+
+	// 删除模板
+	if err := decision.DeletePromptTemplate(templateName); err != nil {
+		if strings.Contains(err.Error(), "不能删除系统模板") {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		} else if strings.Contains(err.Error(), "模板不存在") {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("删除模板失败: %v", err)})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "模板删除成功",
+	})
+}
+
+// handleReloadPromptTemplates 重新加载所有提示词模板
+func (s *Server) handleReloadPromptTemplates(c *gin.Context) {
+	if err := decision.ReloadPromptTemplates(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("重新加载失败: %v", err),
+		})
+		return
+	}
+
+	templates := decision.GetAllPromptTemplates()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "重新加载成功",
+		"count":   len(templates),
+	})
 }

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
 	"nofx/notify"
 	"nofx/pool"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +48,18 @@ type PositionInfo struct {
 	UpdateTime       int64   `json:"update_time"`           // 持仓更新时间戳（毫秒）
 	StopLoss         float64 `json:"stop_loss,omitempty"`   // 止损价格（用于推断平仓原因）
 	TakeProfit       float64 `json:"take_profit,omitempty"` // 止盈价格（用于推断平仓原因）
+}
+
+// OpenOrderInfo represents an open order for AI decision context
+type OpenOrderInfo struct {
+	Symbol       string  `json:"symbol"`        // Trading pair
+	OrderID      int64   `json:"order_id"`      // Order ID
+	Type         string  `json:"type"`          // Order type: STOP_MARKET, TAKE_PROFIT_MARKET, LIMIT, MARKET
+	Side         string  `json:"side"`          // Order side: BUY, SELL
+	PositionSide string  `json:"position_side"` // Position side: LONG, SHORT, BOTH
+	Quantity     float64 `json:"quantity"`      // Order quantity
+	Price        float64 `json:"price"`         // Limit order price (for limit orders)
+	StopPrice    float64 `json:"stop_price"`    // Trigger price (for stop-loss/take-profit orders)
 }
 
 // AccountInfo 账户信息
@@ -82,14 +97,19 @@ type Context struct {
 	CallCount       int                     `json:"call_count"`
 	Account         AccountInfo             `json:"account"`
 	Positions       []PositionInfo          `json:"positions"`
+	OpenOrders      []OpenOrderInfo         `json:"open_orders"` // List of open orders for AI context
 	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
 	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
 	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
-	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
+	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis，包含 RecentTrades）
 	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
 	TakerFeeRate    float64                 `json:"-"` // Taker fee rate (from config, default 0.0004)
 	MakerFeeRate    float64                 `json:"-"` // Maker fee rate (from config, default 0.0002)
+	Timeframes      []string                `json:"-"` // K线时间线配置（从trader配置读取）
+
+	// ⚡ 新增：全局市場情緒數據（VIX 恐慌指數 + 美股狀態）
+	GlobalSentiment *market.MarketSentiment `json:"-"` // 全局風險情緒（免費來源：Yahoo Finance + Alpha Vantage）
 }
 
 // Decision AI的交易决策
@@ -133,8 +153,21 @@ func GetFullDecision(ctx *Context, mcpClient *mcp.Client) (*FullDecision, error)
 // GetFullDecisionWithCustomPrompt 获取AI的完整交易决策（支持自定义prompt和模板选择）
 func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient *mcp.Client, customPrompt string, overrideBase bool, templateName string, webhookPrompt string) (*FullDecision, error) {
 	// 1. 为所有币种获取市场数据
+	fetchStart := time.Now()
 	if err := fetchMarketDataForContext(ctx); err != nil {
 		return nil, fmt.Errorf("获取市场数据失败: %w", err)
+	}
+	fetchDuration := time.Since(fetchStart).Seconds()
+	log.Printf("⏱️  市場數據獲取耗時: %.2fs（%d 個幣種）", fetchDuration, len(ctx.MarketDataMap))
+
+	// 1.5. ⚡ 獲取全局市場情緒（VIX + 美股，免費來源）
+	alphaVantageKey := os.Getenv("ALPHA_VANTAGE_API_KEY") // 可選，用於美股數據（免費 500 calls/day）
+	sentiment, err := market.FetchMarketSentiment(alphaVantageKey)
+	if err != nil {
+		// 非關鍵數據，失敗不阻塞主流程
+		log.Printf("⚠️  獲取全局市場情緒失敗（不影響交易）: %v", err)
+	} else {
+		ctx.GlobalSentiment = sentiment
 	}
 
 	// 2. 构建 System Prompt（固定规则）和 User Prompt（动态数据）
@@ -193,39 +226,83 @@ func fetchMarketDataForContext(ctx *Context) error {
 		symbolSet[coin.Symbol] = true
 	}
 
-	// 并发获取市场数据
+	// ✅ 优化：并发获取市场数据（提升性能 5-10x）
 	// 持仓币种集合（用于判断是否跳过OI检查）
 	positionSymbols := make(map[string]bool)
 	for _, pos := range ctx.Positions {
 		positionSymbols[pos.Symbol] = true
 	}
 
+	// 并发获取市场数据
+	type marketDataResult struct {
+		symbol string
+		data   *market.Data
+		err    error
+	}
+
+	resultChan := make(chan marketDataResult, len(symbolSet))
+	var wg sync.WaitGroup
+
 	for symbol := range symbolSet {
-		data, err := market.Get(symbol)
-		if err != nil {
-			// 单个币种失败不影响整体，只记录错误
+		wg.Add(1)
+		go func(sym string) {
+			defer wg.Done()
+			data, err := market.Get(sym, ctx.Timeframes)
+			resultChan <- marketDataResult{symbol: sym, data: data, err: err}
+		}(symbol)
+	}
+
+	// 等待所有 goroutine 完成
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 收集结果并应用过滤
+	const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
+
+	// ✅ 錯誤統計
+	failedSymbols := []string{}
+	filteredSymbols := []string{}
+
+	for result := range resultChan {
+		if result.err != nil {
+			// 收集失敗的幣種（稍後統一報告）
+			failedSymbols = append(failedSymbols, result.symbol)
 			continue
 		}
+
+		data := result.data
+		symbol := result.symbol
 
 		// ⚠️ 流动性过滤：持仓价值低于阈值的币种不做（多空都不做）
 		// 持仓价值 = 持仓量 × 当前价格
 		// 但现有持仓必须保留（需要决策是否平仓）
-		// 💡 OI 門檻配置：用戶可根據風險偏好調整
-		const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
-
 		isExistingPosition := positionSymbols[symbol]
 		if !isExistingPosition && data.OpenInterest != nil && data.CurrentPrice > 0 {
 			// 计算持仓价值（USD）= 持仓量 × 当前价格
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000 // 转换为百万美元单位
 			if oiValueInMillions < minOIThresholdMillions {
-				log.Printf("⚠️  %s 持仓价值过低(%.2fM USD < %.1fM)，跳过此币种 [持仓量:%.0f × 价格:%.4f]",
-					symbol, oiValueInMillions, minOIThresholdMillions, data.OpenInterest.Latest, data.CurrentPrice)
+				filteredSymbols = append(filteredSymbols, symbol)
 				continue
 			}
 		}
 
 		ctx.MarketDataMap[symbol] = data
+	}
+
+	// ✅ 統一報告結果
+	totalSymbols := len(symbolSet)
+	successCount := len(ctx.MarketDataMap)
+	log.Printf("📊 市場數據獲取完成：成功 %d/%d", successCount, totalSymbols)
+
+	if len(failedSymbols) > 0 {
+		log.Printf("⚠️  數據獲取失敗 (%d): %v", len(failedSymbols), failedSymbols)
+	}
+
+	if len(filteredSymbols) > 0 {
+		log.Printf("🔍 流動性過濾 (%d): %v", len(filteredSymbols), filteredSymbols)
 	}
 
 	// 加载OI Top数据（不影响主流程）
@@ -379,13 +456,27 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("<decision>\n")
 	sb.WriteString("```json\n[\n")
 	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
+	sb.WriteString("  {\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\", \"new_stop_loss\": 155, \"reasoning\": \"移动止损至保本位\"},\n")
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\", \"reasoning\": \"止盈离场\"}\n")
 	sb.WriteString("]\n```\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## 字段说明\n\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait\n")
 	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
-	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning\n\n")
+	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning\n")
+	sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
+	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
+	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+	sb.WriteString("## 🛡️ 未成交挂单提醒\n\n")
+	sb.WriteString("在「当前持仓」部分，你会看到每个持仓的挂单状态：\n\n")
+	sb.WriteString("- 🛡️ **止损单**: 表示该持仓已有止损保护\n")
+	sb.WriteString("- 🎯 **止盈单**: 表示该持仓已设置止盈目标\n")
+	sb.WriteString("- ⚠️ **该持仓没有止损保护！**: 表示该持仓缺少止损单，需要立即设置\n\n")
+	sb.WriteString("**重要**: \n")
+	sb.WriteString("- ✅ 如果看到 🛡️ 止损单已存在，且你想调整止损价格，仍可使用 `update_stop_loss` 动作（系统会自动取消旧单并设置新单）\n")
+	sb.WriteString("- ⚠️ 如果看到 🛡️ 止损单已存在，且当前止损价格合理，**不要重复发送相同的 update_stop_loss 指令**\n")
+	sb.WriteString("- 🚨 如果看到 ⚠️ **该持仓没有止损保护！**，必须立即使用 `update_stop_loss` 设置止损，否则风险极高\n")
+	sb.WriteString("- 同样规则适用于 `update_take_profit` 和 🎯 止盈单\n\n")
 
 	return sb.String()
 }
@@ -403,6 +494,41 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 		sb.WriteString(fmt.Sprintf("BTC: %.2f (1h: %+.2f%%, 4h: %+.2f%%) | MACD: %.4f | RSI: %.2f\n\n",
 			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h,
 			btcData.CurrentMACD, btcData.CurrentRSI7))
+	}
+
+	// ⚡ 全局市場情緒（VIX 恐慌指數 + 美股狀態）
+	if ctx.GlobalSentiment != nil {
+		sb.WriteString("## 📊 全局市場風險情緒\n\n")
+
+		// VIX 恐慌指數
+		if ctx.GlobalSentiment.VIX > 0 {
+			sb.WriteString(fmt.Sprintf("VIX 恐慌指數: %.2f (%s)\n",
+				ctx.GlobalSentiment.VIX, ctx.GlobalSentiment.FearLevel))
+
+			// 根據建議給出風控提示
+			switch ctx.GlobalSentiment.Recommendation {
+			case "normal":
+				sb.WriteString("  → 市場平穩，正常交易\n")
+			case "cautious":
+				sb.WriteString("  → ⚠️  市場輕度恐慌，建議降低槓桿至 5-10x\n")
+			case "defensive":
+				sb.WriteString("  → ⚠️  市場恐慌，建議收緊止損，避免激進操作\n")
+			case "avoid_new_positions":
+				sb.WriteString("  → 🚨 極度恐慌，強烈建議觀望，不要新開倉\n")
+			}
+		}
+
+		// 美股狀態（僅在交易時段顯示）
+		if ctx.GlobalSentiment.USMarket != nil && ctx.GlobalSentiment.USMarket.IsOpen {
+			sb.WriteString(fmt.Sprintf("美股狀態: %s (S&P 500 過去 1h: %+.2f%%)\n",
+				ctx.GlobalSentiment.USMarket.SPXTrend, ctx.GlobalSentiment.USMarket.SPXChange1h))
+
+			if ctx.GlobalSentiment.USMarket.Warning != "" {
+				sb.WriteString(fmt.Sprintf("  %s\n", ctx.GlobalSentiment.USMarket.Warning))
+			}
+		}
+
+		sb.WriteString("\n")
 	}
 
 	// 账户
@@ -440,10 +566,32 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 			// 计算仓位价值（用于 partial_close 检查）
 			positionValue := math.Abs(pos.Quantity) * pos.MarkPrice
 
-			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 数量%.4f | 仓位价值%.2f USDT | 盈亏%+.2f%% | 盈亏金额%+.2f USDT | 最高收益率%.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n\n",
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 数量%.4f | 仓位价值%.2f USDT | 盈亏%+.2f%% | 盈亏金额%+.2f USDT | 最高收益率%.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n",
 				i+1, pos.Symbol, strings.ToUpper(pos.Side),
 				pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
 				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
+
+			// Display stop-loss/take-profit orders for this position to prevent duplicate orders
+			hasStopLoss := false
+
+			for _, order := range ctx.OpenOrders {
+				if order.Symbol != pos.Symbol {
+					continue
+				}
+
+				if order.Type == "STOP_MARKET" || order.Type == "STOP" {
+					sb.WriteString(fmt.Sprintf("   🛡️ 止损单: %.4f (%s)\n", order.StopPrice, order.Side))
+					hasStopLoss = true
+				} else if order.Type == "TAKE_PROFIT_MARKET" || order.Type == "TAKE_PROFIT" {
+					sb.WriteString(fmt.Sprintf("   🎯 止盈单: %.4f (%s)\n", order.StopPrice, order.Side))
+				}
+			}
+
+			if !hasStopLoss {
+				sb.WriteString("   ⚠️ **该持仓没有止损保护！**\n")
+			}
+
+			sb.WriteString("\n")
 
 			// 使用FormatMarketData输出完整市场数据
 			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
@@ -489,6 +637,60 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 		if jsonData, err := json.Marshal(ctx.Performance); err == nil {
 			if err := json.Unmarshal(jsonData, &perfData); err == nil {
 				sb.WriteString(fmt.Sprintf("## 📊 夏普比率: %.2f\n\n", perfData.SharpeRatio))
+			}
+		}
+	}
+
+	// 历史交易记录（用于 AI 学习）- 使用 Performance.RecentTrades 以显示完整的盈亏数据
+	if ctx.Performance != nil {
+		// 提取 RecentTrades
+		type PerformanceData struct {
+			RecentTrades []logger.TradeOutcome `json:"recent_trades"`
+		}
+		var perfData PerformanceData
+		if jsonData, err := json.Marshal(ctx.Performance); err == nil {
+			if err := json.Unmarshal(jsonData, &perfData); err == nil && len(perfData.RecentTrades) > 0 {
+				sb.WriteString("## 📜 近期交易记录（最近10笔）\n\n")
+
+				for i, trade := range perfData.RecentTrades {
+					// 判断盈亏（成功/失败）
+					resultIcon := "✅"
+					if trade.PnL < 0 {
+						resultIcon = "❌"
+					}
+
+					// 格式化时间范围
+					openTimeStr := trade.OpenTime.Format("01-02 15:04")
+					closeTimeStr := trade.CloseTime.Format("15:04")
+
+					// 方向大写
+					direction := strings.ToUpper(trade.Side)
+
+					// 止损标记
+					stopLossTag := ""
+					if trade.WasStopLoss {
+						stopLossTag = " 🛡️ 止损"
+					}
+
+					// 格式化盈亏百分比（添加符号）
+					pnlPctStr := fmt.Sprintf("%+.2f%%", trade.PnLPct)
+
+					// 格式化盈亏金额（添加符号）
+					pnlStr := fmt.Sprintf("%+.2f", trade.PnL)
+
+					// 第一行：时间、币种、方向、杠杆
+					sb.WriteString(fmt.Sprintf("%s %d. [%s→%s] %s %s (%dx杠杆)%s\n",
+						resultIcon, i+1, openTimeStr, closeTimeStr,
+						trade.Symbol, direction, trade.Leverage, stopLossTag))
+
+					// 第二行：开倉价 → 平倉价 (盈亏百分比)
+					sb.WriteString(fmt.Sprintf("   开仓: @ %.2f → 平仓: @ %.2f (%s)\n",
+						trade.OpenPrice, trade.ClosePrice, pnlPctStr))
+
+					// 第三行：盈亏金额 | 持仓时长
+					sb.WriteString(fmt.Sprintf("   盈亏: %s USDT | 持仓: %s\n\n",
+						pnlStr, trade.Duration))
+				}
 			}
 		}
 	}

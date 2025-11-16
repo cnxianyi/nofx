@@ -38,10 +38,32 @@ var (
 	promptsDir = "prompts"
 )
 
+// findPromptsDir 智能查找 prompts 目录（支持测试环境）
+// 1. 优先使用当前目录的 prompts/
+// 2. 如果不存在，向上查找父目录（最多 3 层）
+func findPromptsDir() string {
+	// 尝试当前目录
+	if _, err := os.Stat("prompts"); err == nil {
+		return "prompts"
+	}
+
+	// 向上查找父目录（最多 3 层）
+	for i := 1; i <= 3; i++ {
+		parentPath := strings.Repeat("../", i) + "prompts"
+		if _, err := os.Stat(parentPath); err == nil {
+			return parentPath
+		}
+	}
+
+	// 返回默认值（会在 LoadTemplates 中报错）
+	return "prompts"
+}
+
 // init 包初始化时加载所有提示词模板
 func init() {
 	globalPromptManager = NewPromptManager()
-	if err := globalPromptManager.LoadTemplates(promptsDir); err != nil {
+	actualPromptsDir := findPromptsDir()
+	if err := globalPromptManager.LoadTemplates(actualPromptsDir); err != nil {
 		log.Printf("⚠️  加载提示词模板失败: %v", err)
 	} else {
 		log.Printf("✓ 已加载 %d 个系统提示词模板", len(globalPromptManager.templates))
@@ -203,4 +225,63 @@ func GetAllPromptTemplates() []*PromptTemplate {
 // ReloadPromptTemplates 重新加载所有模板（全局函数）
 func ReloadPromptTemplates() error {
 	return globalPromptManager.ReloadTemplates(promptsDir)
+}
+
+// SavePromptTemplate 保存提示词模板到文件并重新加载
+func SavePromptTemplate(name, content string) error {
+	if name == "" {
+		return fmt.Errorf("模板名称不能为空")
+	}
+	if content == "" {
+		return fmt.Errorf("模板内容不能为空")
+	}
+
+	// 保存到文件
+	filePath := filepath.Join(promptsDir, name+".txt")
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("保存模板文件失败: %w", err)
+	}
+
+	// 重新加载模板
+	if err := ReloadPromptTemplates(); err != nil {
+		log.Printf("⚠️  保存成功但重新加载失败: %v", err)
+	}
+
+	log.Printf("✓ 已保存提示词模板: %s", name)
+	return nil
+}
+
+// DeletePromptTemplate 删除提示词模板文件并重新加载
+func DeletePromptTemplate(name string) error {
+	if name == "" {
+		return fmt.Errorf("模板名称不能为空")
+	}
+
+	// 防止删除系统模板
+	if name == "default" {
+		return fmt.Errorf("不能删除系统模板: default")
+	}
+
+	// 删除文件
+	filePath := filepath.Join(promptsDir, name+".txt")
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("模板不存在: %s", name)
+		}
+		return fmt.Errorf("删除模板文件失败: %w", err)
+	}
+
+	// 重新加载模板
+	if err := ReloadPromptTemplates(); err != nil {
+		log.Printf("⚠️  删除成功但重新加载失败: %v", err)
+	}
+
+	log.Printf("✓ 已删除提示词模板: %s", name)
+	return nil
+}
+
+// TemplateExists 检查模板是否存在
+func TemplateExists(name string) bool {
+	_, err := GetPromptTemplate(name)
+	return err == nil
 }

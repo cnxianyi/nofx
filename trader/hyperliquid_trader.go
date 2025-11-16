@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"nofx/decision"
 	"strconv"
 	"strings"
 	"sync"
@@ -897,10 +898,58 @@ func convertSymbolToHyperliquid(symbol string) string {
 	return symbol
 }
 
+// convertHyperliquidToSymbol 將 Hyperliquid 幣種名稱轉換為標準格式
+func convertHyperliquidToSymbol(coin string) string {
+	// 添加USDT后缀
+	return coin + "USDT"
+}
+
 // absFloat 返回浮点数的绝对值
 func absFloat(x float64) float64 {
 	if x < 0 {
 		return -x
 	}
 	return x
+}
+
+// GetOpenOrders retrieves open orders for AI decision context
+func (t *HyperliquidTrader) GetOpenOrders(symbol string) ([]decision.OpenOrderInfo, error) {
+	// 獲取所有未成交訂單
+	openOrders, err := t.exchange.Info().OpenOrders(t.ctx, t.walletAddr)
+	if err != nil {
+		return nil, fmt.Errorf("獲取未成交訂單失敗: %w", err)
+	}
+
+	// 如果指定了 symbol，轉換為 Hyperliquid 格式
+	var targetCoin string
+	if symbol != "" {
+		targetCoin = convertSymbolToHyperliquid(symbol)
+	}
+
+	// 轉換為 decision.OpenOrderInfo 格式
+	result := make([]decision.OpenOrderInfo, 0)
+	for _, order := range openOrders {
+		// 如果指定了 symbol，只返回該幣種的訂單
+		if targetCoin != "" && order.Coin != targetCoin {
+			continue
+		}
+
+		// 將 Hyperliquid 幣種名稱轉換回標準格式（如 BTC -> BTCUSDT）
+		standardSymbol := convertHyperliquidToSymbol(order.Coin)
+
+		orderInfo := decision.OpenOrderInfo{
+			Symbol:       standardSymbol,
+			OrderID:      order.Oid,
+			Type:         "LIMIT",                     // Hyperliquid OpenOrder 只包含限價單
+			Side:         strings.ToUpper(order.Side), // "buy" -> "BUY"
+			PositionSide: "BOTH",                      // Hyperliquid 不區分持倉方向
+			Quantity:     order.Size,                  // Size 已經是 float64
+			Price:        order.LimitPx,               // LimitPx 已經是 float64
+			StopPrice:    0,                           // OpenOrder 不包含觸發價格信息
+		}
+		result = append(result, orderInfo)
+	}
+
+	log.Printf("✓ 查詢到 %d 個未成交訂單", len(result))
+	return result, nil
 }

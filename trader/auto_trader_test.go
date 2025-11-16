@@ -31,7 +31,7 @@ type AutoTraderTestSuite struct {
 	// Mock 依赖
 	mockTrader *MockTrader
 	mockDB     *MockDatabase
-	mockLogger *logger.DecisionLogger
+	mockLogger logger.IDecisionLogger
 
 	// gomonkey patches
 	patches *gomonkey.Patches
@@ -99,6 +99,8 @@ func (s *AutoTraderTestSuite) SetupTest() {
 		defaultCoins:          []string{"BTC", "ETH"},
 		tradingCoins:          []string{},
 		lastResetTime:         time.Now(),
+		dailyPnLBase:          s.config.InitialBalance,
+		peakEquity:            s.config.InitialBalance,
 		startTime:             time.Now(),
 		callCount:             0,
 		isRunning:             false,
@@ -362,9 +364,11 @@ func (s *AutoTraderTestSuite) TestGetCandidateCoins() {
 	s.Run("使用AI500+OI作为fallback", func() {
 		s.autoTrader.defaultCoins = []string{} // 空的默认币种
 		s.autoTrader.tradingCoins = []string{} // 空的自定义币种
+		s.autoTrader.useCoinPool = true        // 启用 AI500 信号源
+		s.autoTrader.useOITop = true           // 启用 OI Top 信号源
 
-		// Mock pool.GetMergedCoinPool
-		s.patches.ApplyFunc(pool.GetMergedCoinPool, func(ai500Limit int) (*pool.MergedCoinPool, error) {
+		// Mock pool.GetMergedCoinPoolWithOverride
+		s.patches.ApplyFunc(pool.GetMergedCoinPoolWithOverride, func(ai500Limit int, coinPoolURL, oiTopURL string) (*pool.MergedCoinPool, error) {
 			return &pool.MergedCoinPool{
 				AllSymbols: []string{"BTCUSDT", "ETHUSDT"},
 				SymbolSources: map[string][]string{
@@ -490,7 +494,19 @@ func (s *AutoTraderTestSuite) TestExecuteOpenPosition() {
 				s.mockTrader.positions = []map[string]interface{}{}
 			}
 
-			decision := &decision.Decision{Action: tt.action, Symbol: "BTCUSDT", PositionSizeUSD: 1000.0, Leverage: 10}
+			decision := &decision.Decision{
+				Action:          tt.action,
+				Symbol:          "BTCUSDT",
+				PositionSizeUSD: 1000.0,
+				Leverage:        10,
+				StopLoss:        48000.0, // 多单：< 50000，空单：需要覆盖
+				TakeProfit:      52000.0, // 多单：> 50000，空单：需要覆盖
+			}
+			// 空单需要调整止损/止盈方向
+			if tt.action == "open_short" {
+				decision.StopLoss = 52000.0   // 空单止损 > 当前价
+				decision.TakeProfit = 48000.0 // 空单止盈 < 当前价
+			}
 			actionRecord := &logger.DecisionAction{Action: tt.action, Symbol: "BTCUSDT"}
 
 			err := tt.executeFn(decision, actionRecord)
@@ -794,6 +810,8 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 			Symbol:          "BTCUSDT",
 			PositionSizeUSD: 1000.0,
 			Leverage:        10,
+			StopLoss:        48000.0, // 多单：< 当前价 50000
+			TakeProfit:      52000.0, // 多单：> 当前价 50000
 		}
 		actionRecord := &logger.DecisionAction{}
 
@@ -1089,6 +1107,10 @@ func (m *MockTrader) FormatQuantity(symbol string, quantity float64) (string, er
 	return fmt.Sprintf("%.4f", quantity), nil
 }
 
+func (m *MockTrader) GetOpenOrders(symbol string) ([]decision.OpenOrderInfo, error) {
+	return []decision.OpenOrderInfo{}, nil
+}
+
 // ============================================================
 // 测试套件入口
 // ============================================================
@@ -1212,4 +1234,221 @@ func TestCalculatePnLPercentage_RealWorldScenarios(t *testing.T) {
 			t.Errorf("SOL场景: got %v, want %v", result, expected)
 		}
 	})
+}
+
+// ============================================================
+// GetPositions 盈亏百分比计算测试 - Issue #8 修复验证
+// ============================================================
+
+// TestGetPositions_UnrealizedPnLPercentageStability 测试未实现盈亏百分比的稳定性
+// 验证修复 Issue #8：盈亏百分比应该基于开仓价计算保证金，而不是当前价
+func (s *AutoTraderTestSuite) TestGetPositions_UnrealizedPnLPercentageStability() {
+	tests := []struct {
+		name               string
+		entryPrice         float64
+		markPrice          float64
+		quantity           float64
+		leverage           float64
+		unrealizedPnl      float64
+		expectedMarginUsed float64
+		expectedPnlPct     float64
+		description        string
+	}{
+		{
+			name:               "价格上涨_百分比应稳定_基于开仓价",
+			entryPrice:         50000.0,
+			markPrice:          51000.0, // 价格上涨了 2%
+			quantity:           0.1,
+			leverage:           10.0,
+			unrealizedPnl:      100.0,
+			expectedMarginUsed: 500.0, // 保证金 = 0.1 * 50000 / 10 = 500 (基于开仓价)
+			expectedPnlPct:     20.0,  // 100 / 500 * 100 = 20%
+			description:        "当价格上涨时，保证金应该基于开仓价(50000)而不是当前价(51000)",
+		},
+		{
+			name:               "价格下跌_百分比应稳定_基于开仓价",
+			entryPrice:         50000.0,
+			markPrice:          49000.0, // 价格下跌了 2%
+			quantity:           0.1,
+			leverage:           10.0,
+			unrealizedPnl:      -100.0,
+			expectedMarginUsed: 500.0, // 保证金 = 0.1 * 50000 / 10 = 500 (基于开仓价)
+			expectedPnlPct:     -20.0, // -100 / 500 * 100 = -20%
+			description:        "当价格下跌时，保证金应该基于开仓价(50000)而不是当前价(49000)",
+		},
+		{
+			name:               "价格大幅上涨_验证百分比不受当前价影响",
+			entryPrice:         50000.0,
+			markPrice:          55000.0, // 价格上涨了 10%
+			quantity:           0.1,
+			leverage:           10.0,
+			unrealizedPnl:      500.0,
+			expectedMarginUsed: 500.0, // 保证金 = 0.1 * 50000 / 10 = 500 (不是 0.1 * 55000 / 10 = 550)
+			expectedPnlPct:     100.0, // 500 / 500 * 100 = 100%
+			description:        "即使价格大幅上涨，保证金也应该固定在开仓价计算值",
+		},
+		{
+			name:               "高杠杆场景_20倍杠杆",
+			entryPrice:         3000.0,
+			markPrice:          3100.0,
+			quantity:           1.0,
+			leverage:           20.0,
+			unrealizedPnl:      100.0,
+			expectedMarginUsed: 150.0, // 保证金 = 1.0 * 3000 / 20 = 150
+			expectedPnlPct:     66.67, // 100 / 150 * 100 = 66.67%
+			description:        "高杠杆下，保证金计算应该基于开仓价",
+		},
+		{
+			name:               "价格不变_盈亏为0",
+			entryPrice:         50000.0,
+			markPrice:          50000.0,
+			quantity:           0.1,
+			leverage:           10.0,
+			unrealizedPnl:      0.0,
+			expectedMarginUsed: 500.0,
+			expectedPnlPct:     0.0,
+			description:        "价格不变时，盈亏和百分比都应该为0",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// 设置 mock 持仓数据
+			s.mockTrader.positions = []map[string]interface{}{
+				{
+					"symbol":           "BTCUSDT",
+					"side":             "long",
+					"entryPrice":       tt.entryPrice,
+					"markPrice":        tt.markPrice,
+					"positionAmt":      tt.quantity,
+					"unRealizedProfit": tt.unrealizedPnl,
+					"liquidationPrice": 45000.0,
+					"leverage":         tt.leverage,
+				},
+			}
+
+			// 调用 GetPositions
+			positions, err := s.autoTrader.GetPositions()
+
+			s.NoError(err, tt.description)
+			s.Require().Equal(1, len(positions), "应该有1个持仓")
+
+			pos := positions[0]
+
+			// 验证保证金计算（关键：应该基于 entryPrice）
+			actualMarginUsed := pos["margin_used"].(float64)
+			s.InDelta(tt.expectedMarginUsed, actualMarginUsed, 0.01,
+				"保证金应该基于开仓价(%v)计算，而不是当前价(%v). %s",
+				tt.entryPrice, tt.markPrice, tt.description)
+
+			// 验证盈亏百分比
+			actualPnlPct := pos["unrealized_pnl_pct"].(float64)
+			s.InDelta(tt.expectedPnlPct, actualPnlPct, 0.01,
+				"盈亏百分比应该是 %v / %v * 100 = %v%%. %s",
+				tt.unrealizedPnl, tt.expectedMarginUsed, tt.expectedPnlPct, tt.description)
+
+			// 额外验证：盈亏百分比应该等于 unrealizedPnl / marginUsed * 100
+			expectedCalculatedPct := (tt.unrealizedPnl / tt.expectedMarginUsed) * 100
+			s.InDelta(expectedCalculatedPct, actualPnlPct, 0.01,
+				"盈亏百分比计算公式验证失败")
+		})
+	}
+}
+
+// TestGetPositions_MarginCalculationRegression 回归测试：验证保证金计算不使用 markPrice
+func (s *AutoTraderTestSuite) TestGetPositions_MarginCalculationRegression() {
+	s.Run("Issue#8_回归测试_保证金应使用entryPrice", func() {
+		// 模拟 Issue #8 的场景：
+		// 持仓价格波动时，盈亏百分比不应该随着价格波动而变化（当未实现盈亏不变时）
+
+		entryPrice := 50000.0
+		quantity := 0.1
+		leverage := 10.0
+		unrealizedPnl := 100.0 // 固定盈亏
+
+		// 测试不同的市场价格
+		testPrices := []float64{49000.0, 50000.0, 51000.0, 52000.0, 55000.0}
+
+		var pnlPercentages []float64
+
+		for _, markPrice := range testPrices {
+			s.mockTrader.positions = []map[string]interface{}{
+				{
+					"symbol":           "BTCUSDT",
+					"side":             "long",
+					"entryPrice":       entryPrice,
+					"markPrice":        markPrice,
+					"positionAmt":      quantity,
+					"unRealizedProfit": unrealizedPnl,
+					"liquidationPrice": 45000.0,
+					"leverage":         leverage,
+				},
+			}
+
+			positions, err := s.autoTrader.GetPositions()
+			s.NoError(err)
+			s.Require().Equal(1, len(positions))
+
+			pnlPct := positions[0]["unrealized_pnl_pct"].(float64)
+			pnlPercentages = append(pnlPercentages, pnlPct)
+		}
+
+		// 验证：所有的盈亏百分比应该相同（因为未实现盈亏相同，保证金基于开仓价固定）
+		expectedPnlPct := 20.0 // 100 / (0.1 * 50000 / 10) * 100 = 20%
+
+		for i, pnlPct := range pnlPercentages {
+			s.InDelta(expectedPnlPct, pnlPct, 0.01,
+				"当市场价=%v时，盈亏百分比应该稳定在%v%%，但实际是%v%%",
+				testPrices[i], expectedPnlPct, pnlPct)
+		}
+
+		// 验证所有百分比之间的差异应该接近0
+		for i := 1; i < len(pnlPercentages); i++ {
+			diff := math.Abs(pnlPercentages[i] - pnlPercentages[0])
+			s.Less(diff, 0.01,
+				"不同市场价下的盈亏百分比应该相同，但价格从%v到%v时，百分比从%v变为%v",
+				testPrices[0], testPrices[i], pnlPercentages[0], pnlPercentages[i])
+		}
+	})
+}
+
+func (s *AutoTraderTestSuite) TestEnforceRiskLimits_DailyLossTrigger() {
+	at := s.autoTrader
+	at.config.MaxDailyLoss = 5
+	at.config.StopTradingTime = 30 * time.Minute
+	at.dailyPnLBase = 1000
+	at.needsDailyBaseline = false
+
+	reason, triggered := at.enforceRiskLimits(930)
+	s.True(triggered, "应该触发日亏损限制")
+	s.Contains(reason, "最大亏损")
+	s.True(time.Until(at.stopUntil) > 0, "stopUntil 应该更新为未来时间")
+}
+
+func (s *AutoTraderTestSuite) TestEnforceRiskLimits_DrawdownTrigger() {
+	at := s.autoTrader
+	at.config.MaxDailyLoss = 0
+	at.config.MaxDrawdown = 10
+	at.config.StopTradingTime = 15 * time.Minute
+	at.dailyPnLBase = 1200
+	at.peakEquity = 1200
+	at.needsDailyBaseline = false
+
+	reason, triggered := at.enforceRiskLimits(1000)
+	s.True(triggered, "应该触发回撤限制")
+	s.Contains(reason, "账户回撤")
+	s.True(time.Until(at.stopUntil) > 0, "stopUntil 应该被设定")
+}
+
+func (s *AutoTraderTestSuite) TestEnforceRiskLimits_BaselineSync() {
+	at := s.autoTrader
+	at.config.MaxDailyLoss = 10
+	at.dailyPnLBase = 0
+	at.needsDailyBaseline = true
+
+	reason, triggered := at.enforceRiskLimits(1500)
+	s.False(triggered, "首次同步基准不应触发风控")
+	s.Equal(1500.0, at.dailyPnLBase, "基准应同步为当期净值")
+	s.Equal(0.0, at.dailyPnL, "同步基准后日盈亏应为0")
+	s.Equal("", reason)
 }

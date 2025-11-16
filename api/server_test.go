@@ -303,3 +303,5 @@ func TestPublicTraderListResponse_SystemPromptTemplate(t *testing.T) {
 		t.Errorf("Expected system_prompt_template='default', got %v", response["system_prompt_template"])
 	}
 }
+
+// Trader ID tests moved to api/traderid_test.go
