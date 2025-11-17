@@ -100,9 +100,41 @@ func NewDecisionLogger(database config.DatabaseInterface, userID, traderID strin
 
 // LogDecision 记录决策到MongoDB
 func (l *DecisionLogger) LogDecision(record *DecisionRecord) error {
-	l.cycleNumber++
-	record.CycleNumber = l.cycleNumber
 	record.Timestamp = time.Now()
+
+	// 从全局 Redis 获取并递增周期号
+	redis := config.GetGlobalRedis()
+	if redis != nil {
+		key := "cycleNumber:" + l.traderID
+		cycleNumber, err := redis.Incr(key)
+		if err != nil {
+			// Redis 操作失败，尝试从数据库获取最后一条记录的周期号
+			lastCycle, dbErr := l.database.GetLastDecisionLogCycleNumberByTraderID(l.traderID)
+			if dbErr != nil {
+				// 如果数据库也失败，使用本地计数器
+				l.cycleNumber++
+				record.CycleNumber = l.cycleNumber
+				fmt.Printf("⚠️  Redis和数据库获取周期号失败，使用本地计数器: %d\n", record.CycleNumber)
+			} else {
+				// 从数据库获取成功，设置到 Redis 并递增
+				record.CycleNumber = lastCycle + 1
+				redis.SetInt64(key, int64(record.CycleNumber), 0)
+				fmt.Printf("⚠️  Redis获取周期号失败，从数据库恢复: %d\n", record.CycleNumber)
+			}
+		} else {
+			record.CycleNumber = int(cycleNumber)
+		}
+	} else {
+		// 没有 Redis，使用本地计数器或从数据库获取
+		lastCycle, err := l.database.GetLastDecisionLogCycleNumberByTraderID(l.traderID)
+		if err != nil {
+			// 数据库获取失败，使用本地计数器
+			l.cycleNumber++
+			record.CycleNumber = l.cycleNumber
+		} else {
+			record.CycleNumber = lastCycle + 1
+		}
+	}
 
 	// 保存到MongoDB
 	if err := l.database.SaveDecisionLog(l.userID, l.traderID, record); err != nil {

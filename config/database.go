@@ -55,6 +55,8 @@ type DatabaseInterface interface {
 	SaveDecisionLog(userID, traderID string, record interface{}) error
 	GetDecisionLogs(userID, traderID string, limit int) ([]bson.M, error)
 	GetUserIDByTraderID(traderID string) (string, error)
+	GetLastDecisionLogByTraderID(traderID string) ([]bson.M, error)
+	GetLastDecisionLogCycleNumberByTraderID(traderID string) (int, error)
 	Close() error
 }
 
@@ -1014,6 +1016,28 @@ func (d *Database) CreateTrader(trader *TraderRecord) error {
 	return err
 }
 
+// GetAllTraders 获取所有交易员
+func (d *Database) GetAllTraders() ([]*TraderRecord, error) {
+	collection := d.db.Collection("traders")
+	cursor, err := collection.Find(d.ctx, bson.M{}, options.Find().SetSort(bson.M{"created_at": -1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(d.ctx)
+
+	traders := []*TraderRecord{}
+	for cursor.Next(d.ctx) {
+		var trader TraderRecord
+		if err := cursor.Decode(&trader); err != nil {
+			return nil, err
+		}
+		traders = append(traders, &trader)
+	}
+	return traders, nil
+}
+
+//
+
 // GetTraders 获取用户的交易员
 func (d *Database) GetTraders(userID string) ([]*TraderRecord, error) {
 	collection := d.db.Collection("traders")
@@ -1664,4 +1688,59 @@ func (d *Database) migrateTradersWebhookField() error {
 	}
 
 	return nil
+}
+
+// GetLastDecisionLogByTraderID 获取最后一条决策日志
+func (d *Database) GetLastDecisionLogByTraderID(traderID string) ([]bson.M, error) {
+	collection := d.db.Collection("decision_logs")
+	filter := bson.M{"trader_id": traderID}
+	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
+	var doc bson.M
+	err := collection.FindOne(d.ctx, filter, opts).Decode(&doc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return []bson.M{}, nil // 没有记录时返回空数组
+		}
+		return nil, err
+	}
+
+	// 返回record字段，确保类型为bson.M
+	if record, ok := doc["record"].(bson.M); ok {
+		return []bson.M{record}, nil
+	}
+
+	// 如果没有record字段，返回整个文档
+	return []bson.M{doc}, nil
+}
+
+// GetLastDecisionLogCycleNumberByTraderID 获取最后一条决策日志的周期号
+func (d *Database) GetLastDecisionLogCycleNumberByTraderID(traderID string) (int, error) {
+	collection := d.db.Collection("decision_logs")
+	filter := bson.M{"trader_id": traderID}
+	opts := options.FindOne().SetSort(bson.M{"created_at": -1})
+	var doc bson.M
+	err := collection.FindOne(d.ctx, filter, opts).Decode(&doc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			// 没有记录时返回 0，不视为错误
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	// 获取 record 字段
+	record, ok := doc["record"].(bson.M)
+	if !ok {
+		// 如果没有 record 字段，返回 0
+		return 0, nil
+	}
+
+	// 安全地获取 cyclenumber（注意：MongoDB 中字段名是 cyclenumber，不是 cycle_number）
+	cycleNumberValue, exists := record["cyclenumber"]
+	if !exists || cycleNumberValue == nil {
+		// 字段不存在或为 nil，返回 0
+		return 0, nil
+	}
+
+	return int(cycleNumberValue.(int32)), nil
 }

@@ -175,6 +175,40 @@ func validateSecurityConfig() error {
 	return nil
 }
 
+// syncRedis 从数据库同步周期号到Redis
+func syncRedis(database *config.Database) error {
+	redis := config.GetGlobalRedis()
+	if redis == nil {
+		log.Printf("ℹ️  Redis未初始化，跳过周期号同步")
+		return nil
+	}
+
+	traders, err := database.GetAllTraders()
+	if err != nil {
+		return fmt.Errorf("获取交易员列表失败: %w", err)
+	}
+
+	syncedCount := 0
+	for _, trader := range traders {
+		cycle, err := database.GetLastDecisionLogCycleNumberByTraderID(trader.ID)
+		if err != nil {
+			log.Printf("⚠️  获取交易员 %s 的最后一条决策日志失败: %v，设置默认值 0", trader.ID, err)
+			cycle = 0
+		}
+
+		key := "cycleNumber:" + trader.ID
+		if err := redis.SetInt64(key, int64(cycle), 0); err != nil {
+			log.Printf("⚠️  设置交易员 %s 的周期号到Redis失败: %v", trader.ID, err)
+			continue
+		}
+		syncedCount++
+		log.Printf("✅ 交易员 %s 的周期号已同步到Redis: %d", trader.ID, cycle)
+	}
+
+	log.Printf("✅ Redis周期号同步完成: %d/%d 个交易员", syncedCount, len(traders))
+	return nil
+}
+
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
 	fmt.Println("║    🤖 AI多模型交易系统 - 支持 DeepSeek & Qwen            ║")
@@ -201,6 +235,17 @@ func main() {
 		dbPath = os.Args[1]
 	}
 
+	// 初始化全局Redis
+	if err := config.InitGlobalRedis(); err != nil {
+		log.Printf("⚠️  初始化全局Redis失败: %v（将使用数据库存储周期号）", err)
+	} else {
+		defer func() {
+			if redis := config.GetGlobalRedis(); redis != nil {
+				redis.Close()
+			}
+		}()
+	}
+
 	// 读取配置文件
 	configFile, err := loadConfigFile()
 	if err != nil {
@@ -213,6 +258,11 @@ func main() {
 		log.Fatalf("❌ 初始化数据库失败: %v", err)
 	}
 	defer database.Close()
+
+	// 同步Redis配置（从数据库同步周期号到Redis）
+	if err := syncRedis(database); err != nil {
+		log.Printf("⚠️  同步Redis配置失败: %v", err)
+	}
 
 	// 初始化加密服务
 	log.Printf("🔐 初始化加密服务...")
