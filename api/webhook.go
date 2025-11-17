@@ -129,18 +129,28 @@ func (s *Server) handleWebhook(c *gin.Context) {
 
 	log.Printf("替换后 promptTemp: %s", promptTemp)
 
-	traderID := hookContent.TraderID
+	// traderID := hookContent.TraderID
 
-	autoTrader, err := s.traderManager.GetTrader(traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
+	traderIDs := s.traderManager.GetTraderIDs()
 
-	if err := autoTrader.RunCycle(promptTemp); err != nil {
-		log.Printf("❌ Webhook 触发 RunCycle 失败 [%s]: %v", traderID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	for _, traderID := range traderIDs {
+		webhook, _, err := s.database.GetTraderWebhook(traderID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if webhook {
+			autoTrader, err := s.traderManager.GetTrader(traderID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			if err := autoTrader.RunCycle(promptTemp); err != nil {
+				log.Printf("❌ Webhook 触发 RunCycle 失败 [%s]: %v", traderID, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

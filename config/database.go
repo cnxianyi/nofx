@@ -128,6 +128,11 @@ func NewDatabase(dbPath string) (*Database, error) {
 		return nil, fmt.Errorf("初始化默认数据失败: %w", err)
 	}
 
+	// 迁移现有数据：为 traders 表添加 webhook 字段默认值
+	if err := database.migrateTradersWebhookField(); err != nil {
+		log.Printf("⚠️  迁移 traders webhook 字段失败: %v", err)
+	}
+
 	log.Printf("✅ MongoDB 数据库连接成功: %s/%s", uri, dbName)
 	return database, nil
 }
@@ -432,6 +437,8 @@ type TraderRecord struct {
 	LimitPriceOffset     float64   `json:"limit_price_offset" bson:"limit_price_offset"`         // Limit order price offset percentage (e.g., -0.03 for -0.03%)
 	LimitTimeoutSeconds  int       `json:"limit_timeout_seconds" bson:"limit_timeout_seconds"`   // Timeout in seconds before converting to market order (default: 60)
 	Timeframes           string    `json:"timeframes" bson:"timeframes"`                         // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
+	Webhook              bool      `json:"webhook" bson:"webhook"`                               // 是否启用 webhook 模式（true=仅webhook触发，false=正常交易）
+	WebhookStop          bool      `json:"webhook_stop" bson:"webhook_stop"`                     // 是否启用 webhook 停止模式（true=webhook触发时停止交易，false=正常交易）
 	CreatedAt            time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at" bson:"updated_at"`
 }
@@ -998,6 +1005,8 @@ func (d *Database) CreateTrader(trader *TraderRecord) error {
 		"limit_price_offset":     trader.LimitPriceOffset,
 		"limit_timeout_seconds":  trader.LimitTimeoutSeconds,
 		"timeframes":             trader.Timeframes,
+		"webhook":                trader.Webhook,
+		"webhook_stop":           trader.WebhookStop,
 		"created_at":             time.Now(),
 		"updated_at":             time.Now(),
 	}
@@ -1090,6 +1099,8 @@ func (d *Database) UpdateTrader(trader *TraderRecord) error {
 			"limit_price_offset":     trader.LimitPriceOffset,
 			"limit_timeout_seconds":  trader.LimitTimeoutSeconds,
 			"timeframes":             trader.Timeframes,
+			"webhook":                trader.Webhook,
+			"webhook_stop":           trader.WebhookStop,
 			"updated_at":             time.Now(),
 		},
 	}
@@ -1122,6 +1133,21 @@ func (d *Database) DeleteTrader(userID, id string) error {
 	filter := bson.M{"id": id, "user_id": userID}
 	_, err := collection.DeleteOne(d.ctx, filter)
 	return err
+}
+
+// GetTraderWebhook 获取交易员webhook配置
+func (d *Database) GetTraderWebhook(traderID string) (bool, bool, error) {
+	collection := d.db.Collection("traders")
+	filter := bson.M{"id": traderID}
+	var result struct {
+		Webhook     bool `bson:"webhook"`
+		WebhookStop bool `bson:"webhook_stop"`
+	}
+	err := collection.FindOne(d.ctx, filter).Decode(&result)
+	if err != nil {
+		return false, false, err
+	}
+	return result.Webhook, result.WebhookStop, nil
 }
 
 // GetTraderConfig 获取交易员完整配置（包含AI模型和交易所信息）
@@ -1604,4 +1630,38 @@ func (d *Database) GetUserIDByTraderID(traderID string) (string, error) {
 		return "", err
 	}
 	return trader.UserID, nil
+}
+
+// migrateTradersWebhookField 迁移现有 traders 记录，为没有 webhook 和 webhook_stop 字段的记录设置默认值 false
+func (d *Database) migrateTradersWebhookField() error {
+	collection := d.db.Collection("traders")
+
+	// 分别处理 webhook 和 webhook_stop 字段
+	setFields := bson.M{}
+
+	// 检查并设置 webhook 字段
+	filterWebhook := bson.M{"webhook": bson.M{"$exists": false}}
+	updateWebhook := bson.M{"$set": bson.M{"webhook": false}}
+	resultWebhook, err := collection.UpdateMany(d.ctx, filterWebhook, updateWebhook)
+	if err != nil {
+		return fmt.Errorf("更新 traders webhook 字段失败: %w", err)
+	}
+	if resultWebhook.ModifiedCount > 0 {
+		setFields["webhook"] = false
+		log.Printf("✅ 为 %d 条记录添加 webhook 字段（默认值: false）", resultWebhook.ModifiedCount)
+	}
+
+	// 检查并设置 webhook_stop 字段
+	filterWebhookStop := bson.M{"webhook_stop": bson.M{"$exists": false}}
+	updateWebhookStop := bson.M{"$set": bson.M{"webhook_stop": false}}
+	resultWebhookStop, err := collection.UpdateMany(d.ctx, filterWebhookStop, updateWebhookStop)
+	if err != nil {
+		return fmt.Errorf("更新 traders webhook_stop 字段失败: %w", err)
+	}
+	if resultWebhookStop.ModifiedCount > 0 {
+		setFields["webhook_stop"] = false
+		log.Printf("✅ 为 %d 条记录添加 webhook_stop 字段（默认值: false）", resultWebhookStop.ModifiedCount)
+	}
+
+	return nil
 }

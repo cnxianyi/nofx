@@ -660,6 +660,8 @@ type CreateTraderRequest struct {
 	LimitPriceOffset     float64 `json:"limit_price_offset"`    // Limit price offset percentage, default -0.03 (-0.03%)
 	LimitTimeoutSeconds  int     `json:"limit_timeout_seconds"` // Limit order timeout in seconds, default 60
 	Timeframes           string  `json:"timeframes"`            // 时间线选择 (逗号分隔，例如: "1m,4h,1d")
+	Webhook              bool    `json:"webhook"`               // 是否启用 webhook 模式（true=仅webhook触发，false=正常交易）
+	WebhookStop          bool    `json:"webhook_stop"`          // 是否启用 webhook 停止模式（true=webhook触发时停止交易，false=正常交易）
 }
 
 type ModelConfig struct {
@@ -1049,6 +1051,8 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		LimitPriceOffset:     limitPriceOffset,    // 添加限价偏移
 		LimitTimeoutSeconds:  limitTimeoutSeconds, // 添加限价超时
 		Timeframes:           timeframes,          // 添加时间线选择
+		Webhook:              req.Webhook,         // 添加 webhook 模式
+		WebhookStop:          req.WebhookStop,     // 添加 webhook 停止模式
 		IsRunning:            false,
 	}
 	log.Printf("✅ [DEBUG] 交易员配置对象已构建: ID=%s, AIModelID=%d, ExchangeID=%d", traderID, aiModelIntID, exchangeIntID)
@@ -1102,6 +1106,8 @@ type UpdateTraderRequest struct {
 	LimitPriceOffset     float64 `json:"limit_price_offset"`    // Limit price offset
 	LimitTimeoutSeconds  int     `json:"limit_timeout_seconds"` // Limit timeout in seconds
 	Timeframes           string  `json:"timeframes"`            // Timeframes selection
+	Webhook              *bool   `json:"webhook"`               // 是否启用 webhook 模式（指针类型，nil表示保持原值）
+	WebhookStop          *bool   `json:"webhook_stop"`          // 是否启用 webhook 停止模式（指针类型，nil表示保持原值）
 }
 
 // handleUpdateTrader 更新交易员配置
@@ -1259,6 +1265,18 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		}
 	}
 
+	// 设置 webhook 模式，允许更新
+	webhook := existingTrader.Webhook // 保持原值
+	if req.Webhook != nil {
+		webhook = *req.Webhook
+	}
+
+	// 设置 webhook_stop 模式，允许更新
+	webhookStop := existingTrader.WebhookStop // 保持原值
+	if req.WebhookStop != nil {
+		webhookStop = *req.WebhookStop
+	}
+
 	// 查询 AI Model 和 Exchange 的自增 ID
 	aiModels, err := s.database.GetAIModels(userID)
 	if err != nil {
@@ -1324,6 +1342,8 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		LimitPriceOffset:     limitPriceOffset,         // 添加限价偏移
 		LimitTimeoutSeconds:  limitTimeoutSeconds,      // 添加限价超时
 		Timeframes:           timeframes,               // 添加时间线选择
+		Webhook:              webhook,                  // 添加 webhook 模式
+		WebhookStop:          webhookStop,              // 添加 webhook 停止模式
 		IsRunning:            existingTrader.IsRunning, // 保持原值
 	}
 
