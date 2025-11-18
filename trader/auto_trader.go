@@ -455,6 +455,35 @@ func (at *AutoTrader) RunCycle(webhookPrompt string) error {
 	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
+	if webhookPrompt == "" {
+		// 获取当前交易员的webhook配置
+		dbInterface, ok := at.database.(dbconfig.DatabaseInterface)
+		if ok {
+			webhook, webhookStop, err := dbInterface.GetTraderWebhook(at.id)
+			log.Printf("🔔 交易员 %s 的webhook配置为 %v，webhookStop配置为 %v", at.id, webhook, webhookStop)
+			if webhook {
+				if err != nil {
+					log.Printf("⚠️  获取交易员webhook配置失败: %v", err)
+				} else if webhookStop {
+					// webhook_stop 为 true，检查是否有持仓
+					if ctx.Account.PositionCount == 0 && len(ctx.Positions) == 0 {
+						// 没有持仓，终止AI决策
+						log.Printf("⏸️  Webhook停止模式：当前无持仓，跳过AI决策")
+						record.Success = true
+						record.ErrorMessage = "Webhook停止模式：无持仓，跳过AI决策"
+						record.ExecutionLog = append(record.ExecutionLog, "⏸️ Webhook停止模式：无持仓，跳过AI决策")
+						at.decisionLogger.LogDecision(record)
+						return nil
+					}
+					// 有持仓，继续执行
+					log.Printf("✅ Webhook停止模式：当前有 %d 个持仓，继续执行AI决策", ctx.Account.PositionCount)
+				}
+			}
+		} else {
+			log.Printf("🔔 交易员 %s 的webhook配置为 false，继续执行AI决策", at.id)
+		}
+	}
+
 	// 5. 调用AI获取完整决策
 	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
 	decision, err := decision.GetFullDecisionWithCustomPrompt(
