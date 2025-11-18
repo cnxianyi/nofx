@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
 	"nofx/notify"
@@ -411,38 +410,40 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 
 	// 2. 硬约束（风险控制）- 动态生成
 	sb.WriteString("# 硬约束（风险控制）\n\n")
-	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
+	sb.WriteString("1. 风险回报比: 必须 ≥ 1:2（冒1%风险，赚2%+收益）\n")
 	sb.WriteString("2. 最多持仓: 2个币种（质量>数量）\n")
-	sb.WriteString(fmt.Sprintf("3. 单币仓位: 山寨%.0f-%.0f U | BTC/ETH %.0f-%.0f U\n",
-		accountEquity*1, accountEquity*2, accountEquity*3, accountEquity*6))
-	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
-	sb.WriteString("5. 保证金: 总使用率 ≤ 70%\n")
+	// sb.WriteString(fmt.Sprintf("3. 单币仓位: 山寨%.0f-%.0f U | BTC/ETH %.0f-%.0f U\n",
+	// 	accountEquity*1, accountEquity*2, accountEquity*3, accountEquity*6))
+	// sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
+	// sb.WriteString("3. BTC和ETH的仓位固定为 300 USDT")
+	// sb.WriteString("4. BTC和ETH的杠杆固定为 10 倍")
+	// sb.WriteString("5. 保证金: 总使用率 ≤ 70%\n")
 
 	// 6. 开仓金额：根据账户规模动态提示（使用统一的配置规则）
-	minBTCETH := calculateMinPositionSize("BTCUSDT", accountEquity)
+	//minBTCETH := calculateMinPositionSize("BTCUSDT", accountEquity)
 
 	// 根据账户规模生成不同的提示语
-	var btcEthHint string
-	if accountEquity < btcEthSizeRules[1].MinEquity {
-		// 小账户模式（< 20U）
-		btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT (⚠️ 小账户模式，降低门槛)", minBTCETH)
-	} else if accountEquity < btcEthSizeRules[2].MinEquity {
-		// 中型账户（20-100U）
-		btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT (根据账户规模动态调整)", minBTCETH)
-	} else {
-		// 大账户（≥100U）
-		btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT", minBTCETH)
-	}
+	// var btcEthHint string
+	// if accountEquity < btcEthSizeRules[1].MinEquity {
+	// 	// 小账户模式（< 20U）
+	// 	btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT (⚠️ 小账户模式，降低门槛)", minBTCETH)
+	// } else if accountEquity < btcEthSizeRules[2].MinEquity {
+	// 	// 中型账户（20-100U）
+	// 	btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT (根据账户规模动态调整)", minBTCETH)
+	// } else {
+	// 	// 大账户（≥100U）
+	// 	btcEthHint = fmt.Sprintf(" | BTC/ETH≥%.0f USDT", minBTCETH)
+	// }
 
-	sb.WriteString("6. 开仓金额: 山寨币≥12 USDT")
-	sb.WriteString(btcEthHint)
+	// sb.WriteString("6. 开仓金额: 山寨币≥12 USDT")
+	// sb.WriteString(btcEthHint)
 	sb.WriteString("\n\n")
 
 	// ⚠️ 重要提醒：防止 AI 误读市场数据中的数字
 	sb.WriteString("⚠️ **重要提醒：计算 position_size_usd 的正确方法**\n\n")
 	sb.WriteString(fmt.Sprintf("- 当前账户净值：**%.2f USDT**\n", accountEquity))
-	sb.WriteString(fmt.Sprintf("- 山寨币开仓范围：**%.0f - %.0f USDT** (净值的 2-3 倍)\n", accountEquity*2, accountEquity*3))
-	sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 3-5 倍)\n", accountEquity*3, accountEquity*5))
+	// sb.WriteString(fmt.Sprintf("- 山寨币开仓范围：**%.0f - %.0f USDT** (净值的 2-3 倍)\n", accountEquity*2, accountEquity*3))
+	// sb.WriteString(fmt.Sprintf("- BTC/ETH开仓范围：**%.0f - %.0f USDT** (净值的 3-5 倍)\n", accountEquity*3, accountEquity*5))
 	sb.WriteString("- ❌ **不要使用市场数据中的任何数字**（如 Open Interest 合约数、Volume、价格等）作为 position_size_usd\n")
 	sb.WriteString("- ✅ **position_size_usd 必须根据账户净值和上述范围计算**\n\n")
 
@@ -661,58 +662,61 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 	}
 
 	// 历史交易记录（用于 AI 学习）- 使用 Performance.RecentTrades 以显示完整的盈亏数据
-	if ctx.Performance != nil {
-		// 提取 RecentTrades
-		type PerformanceData struct {
-			RecentTrades []logger.TradeOutcome `json:"recent_trades"`
-		}
-		var perfData PerformanceData
-		if jsonData, err := json.Marshal(ctx.Performance); err == nil {
-			if err := json.Unmarshal(jsonData, &perfData); err == nil && len(perfData.RecentTrades) > 0 {
-				sb.WriteString("## 📜 近期交易记录（最近10笔）\n\n")
+	// if ctx.Performance != nil {
+	// 	// 提取 RecentTrades
+	// 	type PerformanceData struct {
+	// 		RecentTrades []logger.TradeOutcome `json:"recent_trades"`
+	// 	}
+	// 	var perfData PerformanceData
+	// 	if jsonData, err := json.Marshal(ctx.Performance); err == nil {
+	// 		if err := json.Unmarshal(jsonData, &perfData); err == nil && len(perfData.RecentTrades) > 0 {
+	// 			sb.WriteString("## 📜 近期交易记录（最近10笔）\n\n")
 
-				for i, trade := range perfData.RecentTrades {
-					// 判断盈亏（成功/失败）
-					resultIcon := "✅"
-					if trade.PnL < 0 {
-						resultIcon = "❌"
-					}
+	// 			for i, trade := range perfData.RecentTrades {
+	// 				// 判断盈亏（成功/失败）
+	// 				resultIcon := "✅"
+	// 				if trade.PnL < 0 {
+	// 					resultIcon = "❌"
+	// 				}
 
-					// 格式化时间范围
-					openTimeStr := trade.OpenTime.Format("01-02 15:04")
-					closeTimeStr := trade.CloseTime.Format("15:04")
+	// 				// 格式化时间范围
+	// 				openTimeStr := trade.OpenTime.Format("01-02 15:04")
+	// 				closeTimeStr := trade.CloseTime.Format("15:04")
 
-					// 方向大写
-					direction := strings.ToUpper(trade.Side)
+	// 				// 方向大写
+	// 				direction := strings.ToUpper(trade.Side)
 
-					// 止损标记
-					stopLossTag := ""
-					if trade.WasStopLoss {
-						stopLossTag = " 🛡️ 止损"
-					}
+	// 				// 止损标记
+	// 				stopLossTag := ""
+	// 				if trade.WasStopLoss {
+	// 					stopLossTag = " 🛡️ 止损"
+	// 				}
 
-					// 格式化盈亏百分比（添加符号）
-					pnlPctStr := fmt.Sprintf("%+.2f%%", trade.PnLPct)
+	// 				// 格式化盈亏百分比（添加符号）
+	// 				pnlPctStr := fmt.Sprintf("%+.2f%%", trade.PnLPct)
 
-					// 格式化盈亏金额（添加符号）
-					pnlStr := fmt.Sprintf("%+.2f", trade.PnL)
+	// 				// 格式化盈亏金额（添加符号）
+	// 				pnlStr := fmt.Sprintf("%+.2f", trade.PnL)
 
-					// 第一行：时间、币种、方向、杠杆
-					sb.WriteString(fmt.Sprintf("%s %d. [%s→%s] %s %s (%dx杠杆)%s\n",
-						resultIcon, i+1, openTimeStr, closeTimeStr,
-						trade.Symbol, direction, trade.Leverage, stopLossTag))
+	// 				// 第一行：时间、币种、方向、杠杆
+	// 				sb.WriteString(fmt.Sprintf("%s %d. [%s→%s] %s %s (%dx杠杆)%s\n",
+	// 					resultIcon, i+1, openTimeStr, closeTimeStr,
+	// 					trade.Symbol, direction, trade.Leverage, stopLossTag))
 
-					// 第二行：开倉价 → 平倉价 (盈亏百分比)
-					sb.WriteString(fmt.Sprintf("   开仓: @ %.2f → 平仓: @ %.2f (%s)\n",
-						trade.OpenPrice, trade.ClosePrice, pnlPctStr))
+	// 				// 第二行：开倉价 → 平倉价 (盈亏百分比)
+	// 				sb.WriteString(fmt.Sprintf("   开仓: @ %.2f → 平仓: @ %.2f (%s)\n",
+	// 					trade.OpenPrice, trade.ClosePrice, pnlPctStr))
 
-					// 第三行：盈亏金额 | 持仓时长
-					sb.WriteString(fmt.Sprintf("   盈亏: %s USDT | 持仓: %s\n\n",
-						pnlStr, trade.Duration))
-				}
-			}
-		}
-	}
+	// 				// 第三行：盈亏金额 | 持仓时长
+	// 				sb.WriteString(fmt.Sprintf("   盈亏: %s USDT | 持仓: %s\n\n",
+	// 					pnlStr, trade.Duration))
+
+	// 				// 第四行: 开仓原因
+	// 				//sb.WriteString(fmt.Sprintf("   开仓原因: %s\n", trade.))
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	sb.WriteString("---\n\n")
 	sb.WriteString("现在请分析并输出决策（思维链 + JSON）\n")
