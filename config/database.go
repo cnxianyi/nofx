@@ -51,6 +51,7 @@ type DatabaseInterface interface {
 	LoadBetaCodesFromFile(filePath string) error
 	ValidateBetaCode(code string) (bool, error)
 	UseBetaCode(code, userEmail string) error
+	GetTraderWebhook(traderID string) (bool, bool, error)
 	GetBetaCodeStats() (total, used int, err error)
 	SaveDecisionLog(userID, traderID string, record interface{}) error
 	GetDecisionLogs(userID, traderID string, limit int) ([]bson.M, error)
