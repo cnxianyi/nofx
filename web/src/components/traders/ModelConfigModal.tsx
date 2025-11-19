@@ -139,19 +139,19 @@ export function ModelConfigModal({
                       width: 32,
                       height: 32,
                     }) || (
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{
-                          background:
-                            selectedModel.id === 'deepseek'
-                              ? '#60a5fa'
-                              : '#c084fc',
-                          color: '#fff',
-                        }}
-                      >
-                        {selectedModel.name[0]}
-                      </div>
-                    )}
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                          style={{
+                            background:
+                              selectedModel.id === 'deepseek'
+                                ? '#60a5fa'
+                                : '#c084fc',
+                            color: '#fff',
+                          }}
+                        >
+                          {selectedModel.name[0]}
+                        </div>
+                      )}
                   </div>
                   <div>
                     <div className="font-semibold" style={{ color: '#EAECEF' }}>
@@ -165,7 +165,7 @@ export function ModelConfigModal({
               </div>
             )}
 
-            {selectedModel && (
+            {true && (
               <>
                 <div>
                   <label
@@ -277,7 +277,7 @@ export function ModelConfigModal({
             </button>
             <button
               type="submit"
-              disabled={!selectedModel || !apiKey.trim()}
+              disabled={!apiKey.trim()}
               className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
               style={{ background: '#F0B90B', color: '#000' }}
             >

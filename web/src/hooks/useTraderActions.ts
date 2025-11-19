@@ -375,7 +375,7 @@ export function useTraderActions({
 
       // 找到要配置的模型(优先从已配置列表,其次从支持列表)
       const modelToUpdate =
-        existingModel || supportedModels?.find((m) => m.id === modelId)
+        existingModel || supportedModels?.find((m) => m.id == modelId)
       if (!modelToUpdate) {
         toast.error(t('modelNotExist', language))
         return
