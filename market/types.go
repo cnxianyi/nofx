@@ -16,7 +16,7 @@ type Data struct {
 	CurrentRSI7       float64
 	OpenInterest      *OIData
 	FundingRate       float64
-	IntradaySeries    *IntradayData   // 3分钟数据 - 实时价格
+	IntradaySeries1m  *IntradayData1m // 1分钟数据 - 实时价格
 	MidTermSeries15m  *MidTermData15m // 15分钟数据 - 短期趋势
 	MidTermSeries1h   *MidTermData1h  // 1小时数据 - 中期趋势
 	LongerTermContext *LongerTermData // 4小时数据 - 长期趋势
@@ -46,8 +46,8 @@ type OISnapshot struct {
 	Timestamp time.Time // 时间戳
 }
 
-// IntradayData 日内数据(3分钟间隔) - 主要用于获取实时价格
-type IntradayData struct {
+// IntradayData 日内数据(1分钟间隔) - 主要用于获取实时价格
+type IntradayData1m struct {
 	MidPrices   []float64
 	EMA20Values []float64
 	MACDValues  []float64

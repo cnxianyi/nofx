@@ -36,7 +36,7 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 
 	// 设置默认时间线（如果未指定）
 	if len(timeframes) == 0 {
-		timeframes = []string{"5m", "15m", "1h", "4h"}
+		timeframes = []string{"1m", "5m", "15m", "1h", "4h", "1d"}
 		log.Printf("⚠️  %s 未指定时间线，使用默认值: %v", symbol, timeframes)
 	}
 
@@ -48,7 +48,7 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 
 	// 确定最短时间线（用于计算当前价格和指标）
 	shortestTF := ""
-	tfPriority := []string{"1m", "3m", "5m", "15m", "1h", "4h", "1d"}
+	tfPriority := []string{"1m", "5m", "15m", "1h", "4h", "1d"}
 	for _, tf := range tfPriority {
 		if tfMap[tf] {
 			shortestTF = tf
@@ -58,8 +58,8 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 
 	// 如果没有找到任何短期时间线，使用3m作为默认（兼容旧行为）
 	if shortestTF == "" {
-		shortestTF = "3m"
-		log.Printf("⚠️  %s 未配置任何时间线，使用3m作为默认短期时间线", symbol)
+		shortestTF = "1m"
+		log.Printf("⚠️  %s 未配置任何时间线，使用1m作为默认短期时间线", symbol)
 	}
 
 	// 获取短期K线数据（用于当前价格和指标计算）
@@ -71,12 +71,12 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 			return nil, fmt.Errorf("获取1分钟K线失败: %v", err)
 		}
 		shortKlines = klines1m
-	case "3m":
-		klines3m, err = WSMonitorCli.GetCurrentKlines(symbol, "3m")
-		if err != nil {
-			return nil, fmt.Errorf("获取3分钟K线失败: %v", err)
-		}
-		shortKlines = klines3m
+	// case "3m":
+	// 	klines3m, err = WSMonitorCli.GetCurrentKlines(symbol, "3m")
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("获取3分钟K线失败: %v", err)
+	// 	}
+	// 	shortKlines = klines3m
 	case "5m":
 		klines5m, err = WSMonitorCli.GetCurrentKlines(symbol, "5m")
 		if err != nil {
@@ -183,20 +183,22 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 	fundingRate, _ := getFundingRate(symbol)
 
 	// ✅ 条件性计算时间线数据（只计算用户选择的时间线）
-	var intradayData *IntradayData
+	var intradayData1m *IntradayData1m
 	var midTermData15m *MidTermData15m
 	var midTermData1h *MidTermData1h
 	var longerTermData *LongerTermData
 	var dailyData *DailyData
 
 	// 计算日内系列数据 (1m/3m/5m)
-	if len(klines1m) > 0 {
-		intradayData = calculateIntradaySeries(klines1m)
-	} else if len(klines3m) > 0 {
-		intradayData = calculateIntradaySeries(klines3m)
-	} else if len(klines5m) > 0 {
-		intradayData = calculateIntradaySeries(klines5m)
-	}
+	// if len(klines1m) > 0 {
+	// 	intradayData = calculateIntradaySeries(klines1m)
+	// } else if len(klines3m) > 0 {
+	// 	intradayData = calculateIntradaySeries(klines3m)
+	// } else if len(klines5m) > 0 {
+	// 	intradayData = calculateIntradaySeries(klines5m)
+	// }
+
+	intradayData1m = calculateIntradaySeries1m(klines1m)
 
 	// 计算15分钟系列数据（如果用户选择了15m）
 	if len(klines15m) > 0 {
@@ -228,7 +230,7 @@ func Get(symbol string, timeframes []string) (*Data, error) {
 		CurrentRSI7:       currentRSI7,
 		OpenInterest:      oiData,
 		FundingRate:       fundingRate,
-		IntradaySeries:    intradayData,
+		IntradaySeries1m:  intradayData1m,
 		MidTermSeries15m:  midTermData15m,
 		MidTermSeries1h:   midTermData1h,
 		LongerTermContext: longerTermData,
@@ -350,9 +352,9 @@ func calculateATR(klines []Kline, period int) float64 {
 	return atr
 }
 
-// calculateIntradaySeries 计算日内系列数据
-func calculateIntradaySeries(klines []Kline) *IntradayData {
-	data := &IntradayData{
+// calculateIntradaySeries1m 计算1分钟系列数据
+func calculateIntradaySeries1m(klines []Kline) *IntradayData1m {
+	data := &IntradayData1m{
 		MidPrices:   make([]float64, 0, 10),
 		EMA20Values: make([]float64, 0, 10),
 		MACDValues:  make([]float64, 0, 10),
@@ -798,34 +800,34 @@ func Format(data *Data) string {
 
 	sb.WriteString(fmt.Sprintf("Funding Rate: %.2e\n\n", data.FundingRate))
 
-	if data.IntradaySeries != nil {
-		sb.WriteString("Intraday series (3‑minute intervals, oldest → latest):\n\n")
+	if data.IntradaySeries1m != nil {
+		sb.WriteString("Intraday series (1‑minute intervals, oldest → latest):\n\n")
 
-		if len(data.IntradaySeries.MidPrices) > 0 {
-			sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
+		if len(data.IntradaySeries1m.MidPrices) > 0 {
+			sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries1m.MidPrices)))
 		}
 
-		if len(data.IntradaySeries.EMA20Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA indicators (20‑period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA20Values)))
+		if len(data.IntradaySeries1m.EMA20Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA indicators (20‑period): %s\n\n", formatFloatSlice(data.IntradaySeries1m.EMA20Values)))
 		}
 
-		if len(data.IntradaySeries.MACDValues) > 0 {
-			sb.WriteString(fmt.Sprintf("MACD indicators: %s\n\n", formatFloatSlice(data.IntradaySeries.MACDValues)))
+		if len(data.IntradaySeries1m.MACDValues) > 0 {
+			sb.WriteString(fmt.Sprintf("MACD indicators: %s\n\n", formatFloatSlice(data.IntradaySeries1m.MACDValues)))
 		}
 
-		if len(data.IntradaySeries.RSI7Values) > 0 {
-			sb.WriteString(fmt.Sprintf("RSI indicators (7‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries.RSI7Values)))
+		if len(data.IntradaySeries1m.RSI7Values) > 0 {
+			sb.WriteString(fmt.Sprintf("RSI indicators (7‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries1m.RSI7Values)))
 		}
 
-		if len(data.IntradaySeries.RSI14Values) > 0 {
-			sb.WriteString(fmt.Sprintf("RSI indicators (14‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries.RSI14Values)))
+		if len(data.IntradaySeries1m.RSI14Values) > 0 {
+			sb.WriteString(fmt.Sprintf("RSI indicators (14‑Period): %s\n\n", formatFloatSlice(data.IntradaySeries1m.RSI14Values)))
 		}
 
-		if len(data.IntradaySeries.Volume) > 0 {
-			sb.WriteString(fmt.Sprintf("3m Trading Volume (USDT, reference only): %s\n\n", formatFloatSlice(data.IntradaySeries.Volume)))
+		if len(data.IntradaySeries1m.Volume) > 0 {
+			sb.WriteString(fmt.Sprintf("1m Trading Volume (USDT, reference only): %s\n\n", formatFloatSlice(data.IntradaySeries1m.Volume)))
 		}
 
-		sb.WriteString(fmt.Sprintf("3m ATR (14‑period): %.3f\n\n", data.IntradaySeries.ATR14))
+		sb.WriteString(fmt.Sprintf("1m ATR (14‑period): %.3f\n\n", data.IntradaySeries1m.ATR14))
 	}
 
 	if data.MidTermSeries15m != nil {
@@ -898,6 +900,35 @@ func Format(data *Data) string {
 	}
 
 	if data.DailyContext != nil {
+		sb.WriteString("Higher‑term context (1‑day timeframe):\n\n")
+
+		dailyEMA20 := latestValue(data.DailyContext.EMA20Values)
+		dailyEMA50 := latestValue(data.DailyContext.EMA50Values)
+		dailyATR14 := latestValue(data.DailyContext.ATR14Values)
+		dailyVolumeCurrent := latestValue(data.DailyContext.Volume)
+		dailyVolumeAverage := 0.0
+		if len(data.DailyContext.Volume) > 0 {
+			sum := 0.0
+			for _, v := range data.DailyContext.Volume {
+				sum += v
+			}
+			dailyVolumeAverage = sum / float64(len(data.DailyContext.Volume))
+		}
+
+		sb.WriteString(fmt.Sprintf("20‑Period EMA: %.3f vs. 50‑Period EMA: %.3f\n\n", dailyEMA20, dailyEMA50))
+		sb.WriteString(fmt.Sprintf("14‑Period ATR: %.3f\n\n", dailyATR14))
+		sb.WriteString(fmt.Sprintf("Current Volume: %.3f vs. Average Volume: %.3f\n\n", dailyVolumeCurrent, dailyVolumeAverage))
+
+		if len(data.DailyContext.MACDValues) > 0 {
+			sb.WriteString(fmt.Sprintf("MACD indicators: %s\n\n", formatFloatSlice(data.DailyContext.MACDValues)))
+		}
+
+		if len(data.DailyContext.RSI14Values) > 0 {
+			sb.WriteString(fmt.Sprintf("RSI indicators (14‑Period): %s\n\n", formatFloatSlice(data.DailyContext.RSI14Values)))
+		}
+	}
+
+	if data.DailyContext != nil {
 		sb.WriteString("Daily series (1‑day intervals, oldest → latest):\n\n")
 
 		if len(data.DailyContext.MidPrices) > 0 {
@@ -930,6 +961,13 @@ func Format(data *Data) string {
 	}
 
 	return sb.String()
+}
+
+func latestValue(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	return values[len(values)-1]
 }
 
 // formatPriceWithDynamicPrecision 根据价格区间动态选择精度
