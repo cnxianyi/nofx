@@ -151,7 +151,7 @@ func (client *Client) callOnce(systemPrompt, userPrompt string) (string, error) 
 
 	// 构建请求体
 	requestBody := map[string]interface{}{
-		"model":       client.Model,
+		"model":       "deepseek-chat",
 		"messages":    messages,
 		"temperature": 0.5, // 降低temperature以提高JSON格式稳定性
 		"max_tokens":  client.MaxTokens,
