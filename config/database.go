@@ -316,7 +316,7 @@ func (d *Database) initDefaultData() error {
 		"beta_mode":            "false",
 		"api_server_port":      "8080",
 		"use_default_coins":    "true",
-		"default_coins":        `["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","HYPEUSDT"]`,
+		"default_coins":        `["BTCUSDT","ETHUSDT"]`,
 		"max_daily_loss":       "10.0",
 		"max_drawdown":         "20.0",
 		"stop_trading_minutes": "60",

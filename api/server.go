@@ -434,7 +434,7 @@ func (s *Server) handleGetSystemConfig(c *gin.Context) {
 	}
 	if len(defaultCoins) == 0 {
 		// 使用硬编码的默认币种
-		defaultCoins = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "HYPEUSDT"}
+		defaultCoins = []string{"BTCUSDT", "ETHUSDT"}
 	}
 
 	// 获取杠杆配置

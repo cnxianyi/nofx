@@ -16,12 +16,6 @@ import (
 var defaultMainstreamCoins = []string{
 	"BTCUSDT",
 	"ETHUSDT",
-	"SOLUSDT",
-	"BNBUSDT",
-	"XRPUSDT",
-	"DOGEUSDT",
-	"ADAUSDT",
-	"HYPEUSDT",
 }
 
 // CoinPoolConfig 币种池配置
