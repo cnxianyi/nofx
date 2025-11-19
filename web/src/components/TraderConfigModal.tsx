@@ -643,7 +643,7 @@ export function TraderConfigModal({
                 </label>
                 <div className="grid grid-cols-3 gap-3">
                   {(() => {
-                    const interval = formData.scan_interval_minutes
+                    //const interval = formData.scan_interval_minutes
                     const baseFrames = [
                       { value: '1m', label: '1分钟' },
                       { value: '3m', label: '3分钟' },
