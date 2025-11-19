@@ -32,11 +32,10 @@ export function AIModelsSection({
           return (
             <div
               key={model.id}
-              className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${
-                inUse
-                  ? 'cursor-not-allowed'
-                  : 'cursor-pointer hover:bg-gray-700'
-              }`}
+              className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${inUse
+                ? 'cursor-not-allowed'
+                : 'cursor-pointer hover:bg-gray-700'
+                }`}
               style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
               onClick={() => onModelClick(model.id)}
             >
@@ -46,24 +45,24 @@ export function AIModelsSection({
                     width: 28,
                     height: 28,
                   }) || (
-                    <div
-                      className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-bold"
-                      style={{
-                        background:
-                          model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
-                        color: '#fff',
-                      }}
-                    >
-                      {getShortName(model.name)[0]}
-                    </div>
-                  )}
+                      <div
+                        className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-bold"
+                        style={{
+                          background:
+                            model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
+                          color: '#fff',
+                        }}
+                      >
+                        {getShortName(model.name)[0]}
+                      </div>
+                    )}
                 </div>
                 <div className="min-w-0">
                   <div
                     className="font-semibold text-sm md:text-base truncate"
                     style={{ color: '#EAECEF' }}
                   >
-                    {getShortName(model.name)}
+                    {getShortName(model.customModelName || model.name)}
                   </div>
                   <div className="text-xs" style={{ color: '#848E9C' }}>
                     {inUse

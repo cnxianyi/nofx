@@ -456,7 +456,7 @@ export function TraderConfigModal({
                   >
                     {availableModels.map((model) => (
                       <option key={model.id} value={model.id}>
-                        {getShortName(model.name || model.id).toUpperCase()}
+                        {getShortName(model.customModelName || model.name || model.id).toUpperCase()}
                       </option>
                     ))}
                   </select>
@@ -501,11 +501,10 @@ export function TraderConfigModal({
                     <button
                       type="button"
                       onClick={() => handleInputChange('is_cross_margin', true)}
-                      className={`flex-1 px-3 py-2 rounded text-sm ${
-                        formData.is_cross_margin
-                          ? 'bg-[#F0B90B] text-black'
-                          : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
-                      }`}
+                      className={`flex-1 px-3 py-2 rounded text-sm ${formData.is_cross_margin
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                        }`}
                     >
                       全仓
                     </button>
@@ -514,11 +513,10 @@ export function TraderConfigModal({
                       onClick={() =>
                         handleInputChange('is_cross_margin', false)
                       }
-                      className={`flex-1 px-3 py-2 rounded text-sm ${
-                        !formData.is_cross_margin
-                          ? 'bg-[#F0B90B] text-black'
-                          : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
-                      }`}
+                      className={`flex-1 px-3 py-2 rounded text-sm ${!formData.is_cross_margin
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                        }`}
                     >
                       逐仓
                     </button>
@@ -647,24 +645,27 @@ export function TraderConfigModal({
                   {(() => {
                     const interval = formData.scan_interval_minutes
                     const baseFrames = [
+                      { value: '1m', label: '1分钟' },
+                      { value: '3m', label: '3分钟' },
+                      { value: '5m', label: '5分钟' },
                       { value: '15m', label: '15分钟' },
                       { value: '1h', label: '1小时' },
                       { value: '4h', label: '4小时' },
                       { value: '1d', label: '1天' },
                     ]
 
-                    // 根据扫描间隔智能添加短周期线
-                    const getShortFrames = () => {
-                      if (interval <= 2)
-                        return [{ value: '1m', label: '1分钟' }]
-                      if (interval >= 3 && interval <= 4)
-                        return [{ value: '3m', label: '3分钟' }]
-                      if (interval >= 5 && interval < 15)
-                        return [{ value: '5m', label: '5分钟' }]
-                      return []
-                    }
+                    // // 根据扫描间隔智能添加短周期线
+                    // const getShortFrames = () => {
+                    //   if (interval <= 2)
+                    //     return [{ value: '1m', label: '1分钟' }]
+                    //   if (interval >= 3 && interval <= 4)
+                    //     return [{ value: '3m', label: '3分钟' }]
+                    //   if (interval >= 5 && interval < 15)
+                    //     return [{ value: '5m', label: '5分钟' }]
+                    //   return []
+                    // }
 
-                    const frames = [...getShortFrames(), ...baseFrames]
+                    const frames = [...baseFrames]
 
                     const selectedFrames = formData.timeframes
                       .split(',')
@@ -822,11 +823,10 @@ export function TraderConfigModal({
                     onClick={() =>
                       handleInputChange('order_strategy', 'market_only')
                     }
-                    className={`px-3 py-2 rounded text-sm ${
-                      formData.order_strategy === 'market_only'
-                        ? 'bg-[#F0B90B] text-black'
-                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
-                    }`}
+                    className={`px-3 py-2 rounded text-sm ${formData.order_strategy === 'market_only'
+                      ? 'bg-[#F0B90B] text-black'
+                      : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                      }`}
                   >
                     仅市价单
                   </button>
@@ -835,11 +835,10 @@ export function TraderConfigModal({
                     onClick={() =>
                       handleInputChange('order_strategy', 'conservative_hybrid')
                     }
-                    className={`px-3 py-2 rounded text-sm ${
-                      formData.order_strategy === 'conservative_hybrid'
-                        ? 'bg-[#F0B90B] text-black'
-                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
-                    }`}
+                    className={`px-3 py-2 rounded text-sm ${formData.order_strategy === 'conservative_hybrid'
+                      ? 'bg-[#F0B90B] text-black'
+                      : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                      }`}
                   >
                     保守混合
                   </button>
@@ -848,11 +847,10 @@ export function TraderConfigModal({
                     onClick={() =>
                       handleInputChange('order_strategy', 'limit_only')
                     }
-                    className={`px-3 py-2 rounded text-sm ${
-                      formData.order_strategy === 'limit_only'
-                        ? 'bg-[#F0B90B] text-black'
-                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
-                    }`}
+                    className={`px-3 py-2 rounded text-sm ${formData.order_strategy === 'limit_only'
+                      ? 'bg-[#F0B90B] text-black'
+                      : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                      }`}
                   >
                     仅限价单
                   </button>
@@ -981,11 +979,10 @@ export function TraderConfigModal({
                           key={coin}
                           type="button"
                           onClick={() => handleCoinToggle(coin)}
-                          className={`px-2 py-1 text-xs rounded transition-colors ${
-                            selectedCoins.includes(coin)
-                              ? 'bg-[#F0B90B] text-black'
-                              : 'bg-[#1E2329] text-[#848E9C] border border-[#2B3139] hover:border-[#F0B90B]'
-                          }`}
+                          className={`px-2 py-1 text-xs rounded transition-colors ${selectedCoins.includes(coin)
+                            ? 'bg-[#F0B90B] text-black'
+                            : 'bg-[#1E2329] text-[#848E9C] border border-[#2B3139] hover:border-[#F0B90B]'
+                            }`}
                         >
                           {coin.replace('USDT', '')}
                         </button>

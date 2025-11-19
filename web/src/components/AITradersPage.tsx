@@ -678,16 +678,16 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           allExchanges?.map((e) =>
             e.id === exchangeId
               ? {
-                  ...e,
-                  apiKey,
-                  secretKey,
-                  testnet,
-                  hyperliquidWalletAddr,
-                  asterUser,
-                  asterSigner,
-                  asterPrivateKey,
-                  enabled: true,
-                }
+                ...e,
+                apiKey,
+                secretKey,
+                testnet,
+                hyperliquidWalletAddr,
+                asterUser,
+                asterSigner,
+                asterPrivateKey,
+                enabled: true,
+              }
               : e
           ) || []
       } else {
@@ -940,9 +940,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                   style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
                 >
                   <div
-                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${
-                      inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
-                    }`}
+                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
+                      }`}
                     onClick={() => !inUse && handleModelClick(model.id)}
                   >
                     <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
@@ -950,17 +949,17 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                         width: 28,
                         height: 28,
                       }) || (
-                        <div
-                          className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-bold"
-                          style={{
-                            background:
-                              model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
-                            color: '#fff',
-                          }}
-                        >
-                          {getShortName(model.name)[0]}
-                        </div>
-                      )}
+                          <div
+                            className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-bold"
+                            style={{
+                              background:
+                                model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
+                              color: '#fff',
+                            }}
+                          >
+                            {getShortName(model.name)[0]}
+                          </div>
+                        )}
                     </div>
                     <div className="min-w-0">
                       <div
@@ -1036,16 +1035,16 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             width: 48,
                             height: 48,
                           }) || (
-                            <div
-                              className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
-                              style={{
-                                background: model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
-                                color: '#fff',
-                              }}
-                            >
-                              {model.name[0]}
-                            </div>
-                          )}
+                              <div
+                                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
+                                style={{
+                                  background: model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
+                                  color: '#fff',
+                                }}
+                              >
+                                {model.name[0]}
+                              </div>
+                            )}
                         </div>
                         <div className="font-semibold text-sm" style={{ color: '#EAECEF' }}>
                           {getShortName(model.name)}
@@ -1084,9 +1083,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                   style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
                 >
                   <div
-                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${
-                      inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
-                    }`}
+                    className={`flex items-center gap-2 md:gap-3 flex-1 min-w-0 ${inUse ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-80'
+                      }`}
                     onClick={() => !inUse && handleExchangeClick(exchange.id)}
                   >
                     <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
@@ -1259,21 +1257,20 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       {t('status', language)}
                     </div> */}
                     <div
-                      className={`px-2 md:px-3 py-1 rounded text-xs font-bold ${
-                        trader.is_running
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
+                      className={`px-2 md:px-3 py-1 rounded text-xs font-bold ${trader.is_running
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                        }`}
                       style={
                         trader.is_running
                           ? {
-                              background: 'rgba(14, 203, 129, 0.1)',
-                              color: '#0ECB81',
-                            }
+                            background: 'rgba(14, 203, 129, 0.1)',
+                            color: '#0ECB81',
+                          }
                           : {
-                              background: 'rgba(246, 70, 93, 0.1)',
-                              color: '#F6465D',
-                            }
+                            background: 'rgba(246, 70, 93, 0.1)',
+                            color: '#F6465D',
+                          }
                       }
                     >
                       {trader.is_running
@@ -1328,13 +1325,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                       style={
                         trader.is_running
                           ? {
-                              background: 'rgba(246, 70, 93, 0.1)',
-                              color: '#F6465D',
-                            }
+                            background: 'rgba(246, 70, 93, 0.1)',
+                            color: '#F6465D',
+                          }
                           : {
-                              background: 'rgba(14, 203, 129, 0.1)',
-                              color: '#0ECB81',
-                            }
+                            background: 'rgba(14, 203, 129, 0.1)',
+                            color: '#0ECB81',
+                          }
                       }
                     >
                       {trader.is_running
@@ -1378,7 +1375,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               <div className="rounded-lg p-3 md:p-4" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
                 <div className="flex items-center gap-3">
                   <div className="flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-sm md:text-base font-bold"
-                       style={{ backgroundColor: configuredModels.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
+                    style={{ backgroundColor: configuredModels.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
                     {configuredModels.length > 0 ? '✓' : '1'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1411,7 +1408,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               <div className="rounded-lg p-3 md:p-4" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
                 <div className="flex items-center gap-3">
                   <div className="flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-sm md:text-base font-bold"
-                       style={{ backgroundColor: configuredExchanges.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
+                    style={{ backgroundColor: configuredExchanges.length > 0 ? '#0ECB81' : '#474D57', color: '#fff' }}>
                     {configuredExchanges.length > 0 ? '✓' : '2'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1444,7 +1441,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               <div className="rounded-lg p-4 md:p-6" style={{ backgroundColor: '#1E2329', border: '1px solid #2B3139' }}>
                 <div className="flex items-start gap-3 md:gap-4">
                   <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-base md:text-lg font-bold"
-                       style={{ backgroundColor: (traders && traders.length > 0) ? '#0ECB81' : '#474D57', color: '#fff' }}>
+                    style={{ backgroundColor: (traders && traders.length > 0) ? '#0ECB81' : '#474D57', color: '#fff' }}>
                     {(traders && traders.length > 0) ? '✓' : '3'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1923,16 +1920,16 @@ function ModelConfigModal({
                             width: 48,
                             height: 48,
                           }) || (
-                            <div
-                              className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
-                              style={{
-                                background: model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
-                                color: '#fff',
-                              }}
-                            >
-                              {model.name[0]}
-                            </div>
-                          )}
+                              <div
+                                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold"
+                                style={{
+                                  background: model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
+                                  color: '#fff',
+                                }}
+                              >
+                                {model.name[0]}
+                              </div>
+                            )}
                         </div>
                         <div className="font-semibold text-sm" style={{ color: '#EAECEF' }}>
                           {getShortName(model.name)}
@@ -1958,19 +1955,19 @@ function ModelConfigModal({
                       width: 32,
                       height: 32,
                     }) || (
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{
-                          background:
-                            selectedModel.id === 'deepseek'
-                              ? '#60a5fa'
-                              : '#c084fc',
-                          color: '#fff',
-                        }}
-                      >
-                        {selectedModel.name[0]}
-                      </div>
-                    )}
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                          style={{
+                            background:
+                              selectedModel.id === 'deepseek'
+                                ? '#60a5fa'
+                                : '#c084fc',
+                            color: '#fff',
+                          }}
+                        >
+                          {selectedModel.name[0]}
+                        </div>
+                      )}
                   </div>
                   <div>
                     <div className="font-semibold" style={{ color: '#EAECEF' }}>
