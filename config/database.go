@@ -607,6 +607,8 @@ func (d *Database) GetAIModels(userID string) ([]*AIModelConfig, error) {
 func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customAiName, customModelName string) error {
 	collection := d.db.Collection("ai_models")
 
+	log.Printf("UpdateAIModel: userID=%s, id=%s, enabled=%t, apiKey=%s, customAPIURL=%s, customAiName=%s, customModelName=%s", userID, id, enabled, apiKey, customAPIURL, customAiName, customModelName)
+
 	// 先尝试精确匹配 model_id
 	filter := bson.M{"user_id": userID, "model_id": id}
 	var existingModel bson.M
@@ -645,7 +647,7 @@ func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, custom
 	if !isNewModel {
 		// 兼容旧逻辑：将 id 作为 provider 查找
 		provider = id
-		filter = bson.M{"user_id": userID, "provider": provider}
+		filter = bson.M{"user_id": userID, "provider": provider, "custom_model_name": customModelName}
 		err = collection.FindOne(d.ctx, filter).Decode(&existingModel)
 
 		if err == nil {
@@ -738,7 +740,7 @@ func (d *Database) UpdateAIModel(userID, id string, enabled bool, apiKey, custom
 
 	doc := bson.M{
 		"id":                modelID,
-		"model_id":          newModelID,
+		"model_id":          newModelID + "_" + customModelName,
 		"user_id":           userID,
 		"name":              name,
 		"provider":          provider,
