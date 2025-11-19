@@ -614,10 +614,10 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 			sb.WriteString("\n")
 
 			// 使用FormatMarketData输出完整市场数据
-			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
-				sb.WriteString(market.Format(marketData))
-				sb.WriteString("\n")
-			}
+			// if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
+			// 	sb.WriteString(market.Format(marketData))
+			// 	sb.WriteString("\n")
+			// }
 		}
 	} else {
 		sb.WriteString("当前持仓: 无\n\n")
