@@ -66,18 +66,18 @@ func (i *IPRateLimiter) cleanupStaleEntries() {
 // 用途: 限制全局 API 请求频率
 func RateLimitMiddleware(limiter *IPRateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
+		// ip := c.ClientIP()
 
-		l := limiter.GetLimiter(ip)
-		if !l.Allow() {
-			log.Printf("⚠️ [RATE_LIMIT] IP %s 请求过于频繁 (全局限制)", ip)
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":       "请求过于频繁，请稍后再试",
-				"retry_after": 60,
-			})
-			c.Abort()
-			return
-		}
+		// l := limiter.GetLimiter(ip)
+		// if !l.Allow() {
+		// 	log.Printf("⚠️ [RATE_LIMIT] IP %s 请求过于频繁 (全局限制)", ip)
+		// 	c.JSON(http.StatusTooManyRequests, gin.H{
+		// 		"error":       "请求过于频繁，请稍后再试",
+		// 		"retry_after": 60,
+		// 	})
+		// 	c.Abort()
+		// 	return
+		// }
 
 		c.Next()
 	}
