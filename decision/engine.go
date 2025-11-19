@@ -470,13 +470,13 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
 	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
 	sb.WriteString("## ⚠️ 盈利保持\n\n")
-	sb.WriteString("**当盈利 > 0.5 USDT 后必须按照规则更新止盈线**\n\n")
+	sb.WriteString("**当盈利 > 2 USDT 后必须按照规则更新止损线,如果没有盈利则灵活设置**\n\n")
 	sb.WriteString("计算方式：新止损价格 = (开仓价格 + 当前价格) / 2\n\n")
 	sb.WriteString("示例：\n")
 	sb.WriteString("- 开仓价格：100000 USDT\n")
 	sb.WriteString("- 当前价格：101000 USDT\n")
 	sb.WriteString("- 新止损价格 = (100000 + 101000) / 2 = 100500 USDT\n\n")
-	sb.WriteString("**规则**：当持仓盈利 > 0.5 USDT 时，使用 `update_stop_loss` 动作将止损价格更新为成本价与当前价的中间值，以锁定部分利润。\n\n")
+	sb.WriteString("**规则**：当持仓盈利 > 2 USDT 时，使用 `update_stop_loss` 动作将止损价格更新为成本价与当前价的中间值，以锁定部分利润。\n\n")
 	sb.WriteString("## 🛡️ 未成交挂单提醒\n\n")
 	sb.WriteString("在「当前持仓」部分，你会看到每个持仓的挂单状态：\n\n")
 	sb.WriteString("- 🛡️ **止损单**: 表示该持仓已有止损保护\n")
@@ -508,7 +508,7 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 
 	// ⚡ 全局市場情緒（VIX 恐慌指數 + 美股狀態）
 	if ctx.GlobalSentiment != nil {
-		sb.WriteString("## 📊 全局市場風險情緒\n\n")
+		// sb.WriteString("## 📊 全局市場風險情緒\n\n")
 
 		// VIX 恐慌指數
 		if ctx.GlobalSentiment.VIX > 0 {
@@ -516,16 +516,16 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 				ctx.GlobalSentiment.VIX, ctx.GlobalSentiment.FearLevel))
 
 			// 根據建議給出風控提示
-			switch ctx.GlobalSentiment.Recommendation {
-			case "normal":
-				sb.WriteString("  → 市場平穩，正常交易\n")
-			case "cautious":
-				sb.WriteString("  → ⚠️  市場輕度恐慌，建議降低槓桿至 3-5x\n")
-			case "defensive":
-				sb.WriteString("  → ⚠️  市場恐慌，建議收緊止損，避免激進操作\n")
-			case "avoid_new_positions":
-				sb.WriteString("  → 🚨 極度恐慌，強烈建議觀望，不要新開倉\n")
-			}
+			// switch ctx.GlobalSentiment.Recommendation {
+			// case "normal":
+			// 	sb.WriteString("  → 市場平穩，正常交易\n")
+			// case "cautious":
+			// 	sb.WriteString("  → ⚠️  市場輕度恐慌，建議降低槓桿至 3-5x\n")
+			// case "defensive":
+			// 	sb.WriteString("  → ⚠️  市場恐慌，建議收緊止損，避免激進操作\n")
+			// case "avoid_new_positions":
+			// 	sb.WriteString("  → 🚨 極度恐慌，強烈建議觀望，不要新開倉\n")
+			// }
 		}
 
 		// 美股狀態（僅在交易時段顯示）
@@ -553,13 +553,13 @@ func buildUserPrompt(ctx *Context, webhookPrompt string) string {
 	// webhook prompt
 	if webhookPrompt != "" {
 		sb.WriteString("## webhook触发\n\n")
-		sb.WriteString("**如果用户的webhook触发了该次决策，那么在进行原有判断的情况下，着重考虑用户的webhook触发结果。**\n\n")
-		if strings.Contains(webhookPrompt, "Bullish Rejection") {
-			sb.WriteString("- 如果触发的是 Bullish Rejection。那么计算该币种多单评分，如果评分超过70即可开单\n")
-		}
-		if strings.Contains(webhookPrompt, "Bearish Rejection") {
-			sb.WriteString("- 如果触发的是 Bearish Rejection。那么计算该币种空单评分，如果评分超过70即可开单\n")
-		}
+		// sb.WriteString("**如果用户的webhook触发了该次决策，那么在进行原有判断的情况下，着重考虑用户的webhook触发结果。**\n\n")
+		// if strings.Contains(webhookPrompt, "Bullish Rejection") {
+		// 	sb.WriteString("- 如果触发的是 Bullish Rejection。那么计算该币种多单评分，如果评分超过70即可开单\n")
+		// }
+		// if strings.Contains(webhookPrompt, "Bearish Rejection") {
+		// 	sb.WriteString("- 如果触发的是 Bearish Rejection。那么计算该币种空单评分，如果评分超过70即可开单\n")
+		// }
 		sb.WriteString("webhook内容: \n\n")
 		sb.WriteString(webhookPrompt)
 		sb.WriteString("\n\n\n")
